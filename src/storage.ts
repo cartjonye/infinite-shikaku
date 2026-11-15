@@ -84,33 +84,24 @@ function read(key: string): any {
   }
 }
 
-/**
- * Older saves (v1, v2) used a different world layout and are wiped entirely.
- * Only the "seen the tutorial" flag carries over.
- */
-function dropLegacy(): boolean {
-  let seenHelp = false;
+/** Older saves (v1, v2) used a different world layout: delete them entirely. */
+function dropLegacy() {
   for (const k of LEGACY_KEYS) {
-    const d = read(k);
-    if (d?.seenHelp) seenHelp = true;
     try {
       localStorage.removeItem(k);
     } catch {
       /* ignore */
     }
   }
-  return seenHelp;
 }
 
 export function loadSave(): SaveData {
-  const legacySeenHelp = dropLegacy();
+  dropLegacy();
   const d = read(SAVE_KEY);
   if (isValid(d, SAVE_VERSION)) {
     return sanitize({ ...freshSave(), ...d, stats: { ...emptyStats(), ...d.stats } });
   }
-  const fresh = freshSave();
-  fresh.seenHelp = legacySeenHelp;
-  return fresh;
+  return freshSave();
 }
 
 export function writeSave(d: SaveData): boolean {
