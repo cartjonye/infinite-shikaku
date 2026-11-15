@@ -207,3 +207,40 @@ button { font: inherit; color: inherit; cursor: pointer; }
   80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   100% { opacity: 0; transform: translate(-50%, -58%) scale(1); }
 }
+
+.tool-btn {
+  height: 44px;
+  min-width: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-weight: 800;
+  font-size: 22px;
+  line-height: 1;
+}
+.tool-btn[hidden] { display: none; }
+.zoom-stack {
+  position: fixed;
+  right: 16px;
+  bottom: calc(22px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tool-btn.easier {
+  position: fixed;
+  left: 16px;
+  bottom: calc(22px + env(safe-area-inset-bottom));
+  font-size: 14px;
+  padding: 0 12px;
+  color: var(--accent);
+}
+@media (max-width: 420px) {
+  .tool-btn.easier span { display: none; }
+  #continue { padding: 14px 22px; }
+}

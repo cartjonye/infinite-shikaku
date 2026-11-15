@@ -4,16 +4,26 @@ An endless, seamless Shikaku world. The board is an infinite lattice of 8×8 puz
 
 ## Expanding world
 
-Zones grow in concentric square rings around the start. Every boundary sits on a common multiple of the two tile sizes that meet there, so the board stays seamless:
+Zones grow in concentric square rings around the start, where four 6×6 zones meet. Every boundary sits on a common multiple of the two tile sizes that meet there, and every ring's width is a multiple of its tile size, so the board stays seamless:
 
-| Zones | Distance from centre (cells) | Ring side | Zones in ring |
-|---|---|---|---|
-| 8×8 | 0–36 | 72 = 9·8 = 6·12 | 81 |
-| 12×12 | 36–72 | 144 = 12·12 = 9·16 | 108 |
-| 16×16 | 72–120 | 240 = 15·16 = 12·20 | 144 |
-| 20×20 | 120–∞ | | ∞ |
+| Size | Full side | Rings | Zones | Depth |
+|---|---|---|---|---|
+| 6×6 | 72 | 6 | 144 | 1–6 |
+| 8×8 | 120 | 3 | 144 | 7–9 |
+| 10×10 | 180 | 3 | 180 | 10–12 |
+| 12×12 | 300 | 5 | 400 | 13–17 |
+| 15×15 | 480 | 6 | 624 | 18–23 |
+| 16×16 | 576 | 3 | 396 | 24–26 |
+| 18×18 | 720 | 4 | 576 | 27–30 |
+| 20×20 | 840 | 3 | 468 | 31–33 |
+| 24×24 | ∞ | ∞ | ∞ | 34+ |
 
-8×8 zones unlock when any neighbour is solved. Bigger ("super") zones unlock only when **every** zone along one whole side is solved. For example, a 12×12 zone bordering two 8×8 zones needs both of them solved. Locked super zones show the progress on each side. The first time a bigger size unlocks, the camera zooms out to reveal the new ring.
+**Unlocking.** Within a tier, a zone opens when any neighbour is solved. Where the size steps up, a zone opens only when every zone along one side is solved **plus one diagonal zone** past that side's corner. This means you can't just drill straight outward. Locked zones show their side progress and diagonal pips.
+
+**Tools.**
+- **+ / − / Fit** controls zoom. The game never zooms on its own.
+- **Easier** jumps to the nearest open zone with a smaller grid.
+- Keyboard: `+` `-` `f` `e` `c`.
 
 ## Play
 
@@ -21,7 +31,7 @@ Zones grow in concentric square rings around the start. Every boundary sits on a
 - Drag on fog or solved areas to pan. Pinch or scroll to zoom.
 - **Continue** glides the camera to the nearest unlocked zone.
 - The game tracks the timer per zone, best, average and last solve times, farthest level and total play time.
-- Progress saves automatically to `localStorage` under the key `infinite-shikaku:v2`. Older v1 saves are migrated automatically.
+- Progress saves automatically to `localStorage` under the key `infinite-shikaku:v3`. Saves from older layouts are discarded.
 
 ## Develop
 

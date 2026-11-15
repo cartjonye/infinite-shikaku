@@ -2,10 +2,12 @@
 import {
   ORIGIN,
   SIDES,
+  diagonalZones,
   edgeNeighbours,
+  isStepSide,
   zoneByKey,
   zoneCenter,
-  zoneDistance,
+  zoneDepth,
   type Side,
   type Zone,
 } from './layout';
@@ -13,6 +15,16 @@ import type { SaveData } from './storage';
 import { rectArea, rectContains, rectsOverlap, type Puzzle, type Rect } from './types';
 
 export type ZoneStatus = 'locked' | 'open' | 'solved';
+
+export interface SideState {
+  side: Side;
+  /** true when the side borders smaller zones (whole side + 1 diagonal needed) */
+  step: boolean;
+  solved: number;
+  total: number;
+  diagSolved: boolean;
+  satisfied: boolean;
+}
 
 export class World {
   solved: Set<string>;
@@ -25,27 +37,38 @@ export class World {
     return this.solved.has(z.key);
   }
 
-  /** For each side: how many of the zones along it are solved, out of how many. */
-  sideProgress(z: Zone): Record<Side, [number, number]> {
-    const nb = edgeNeighbours(z);
-    const out = {} as Record<Side, [number, number]>;
-    for (const s of SIDES) out[s] = [nb[s].filter((n) => this.solved.has(n.key)).length, nb[s].length];
-    return out;
+  sideState(z: Zone, side: Side): SideState {
+    const nb = edgeNeighbours(z)[side];
+    const solved = nb.filter((n) => this.solved.has(n.key)).length;
+    const step = isStepSide(z, side);
+    if (!step) {
+      return { side, step, solved, total: nb.length, diagSolved: false, satisfied: solved > 0 };
+    }
+    const diagSolved = diagonalZones(z, side).some((d) => this.solved.has(d.key));
+    return { side, step, solved, total: nb.length, diagSolved, satisfied: solved === nb.length && diagSolved };
+  }
+
+  /** The step side closest to being satisfied (for progress hints), or null. */
+  bestStepSide(z: Zone): SideState | null {
+    let best: SideState | null = null;
+    const score = (s: SideState) => s.solved / s.total + (s.diagSolved ? 0.5 : 0);
+    for (const side of SIDES) {
+      const st = this.sideState(z, side);
+      if (!st.step) continue;
+      if (!best || score(st) > score(best)) best = st;
+    }
+    return best;
   }
 
   /**
-   * 8×8 zones open when any edge neighbour is solved.
-   * Bigger ("super") zones open only when every neighbour along at least one whole side is solved.
+   * A zone opens through any satisfied side:
+   * - a side with no smaller neighbours: any neighbour on it solved;
+   * - a side bordering smaller zones: every zone on it solved, plus one diagonal zone.
    */
   status(z: Zone): ZoneStatus {
     if (this.solved.has(z.key)) return 'solved';
     if (z === ORIGIN) return 'open';
-    const nb = edgeNeighbours(z);
-    if (z.tier === 0) {
-      for (const s of SIDES) if (nb[s].some((n) => this.solved.has(n.key))) return 'open';
-      return 'locked';
-    }
-    for (const s of SIDES) if (nb[s].every((n) => this.solved.has(n.key))) return 'open';
+    for (const side of SIDES) if (this.sideState(z, side).satisfied) return 'open';
     return 'locked';
   }
 
@@ -106,7 +129,7 @@ export class World {
     // solved zones render from the (deterministic) solution, so no need to store their rects
     delete this.save.rects[z.key];
     delete this.save.timers[z.key];
-    this.save.stats.farthest = Math.max(this.save.stats.farthest, zoneDistance(z));
+    this.save.stats.deepest = Math.max(this.save.stats.deepest, zoneDepth(z));
   }
 
   /** All open zones: unlocked but not yet solved. */
@@ -123,7 +146,13 @@ export class World {
       const z = zoneByKey(k);
       if (!z) continue;
       const nb = edgeNeighbours(z);
-      for (const s of SIDES) nb[s].forEach(consider);
+      for (const s of SIDES)
+        for (const n of nb[s]) {
+          consider(n);
+          // a solved zone can complete a bigger zone's diagonal requirement one step away
+          const nn = edgeNeighbours(n);
+          for (const t of SIDES) nn[t].forEach(consider);
+        }
     }
     return out;
   }
@@ -134,7 +163,7 @@ export class World {
     let bestD = Infinity;
     for (const z of this.openZones()) {
       const [cx, cy] = zoneCenter(z);
-      const d = Math.hypot(cx - wx, cy - wy) + zoneDistance(z) * 0.001;
+      const d = Math.hypot(cx - wx, cy - wy) + zoneDepth(z) * 0.001;
       if (d < bestD) {
         bestD = d;
         best = z;

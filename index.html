@@ -28,6 +28,17 @@
     <div class="hud-bottom">
       <button id="continue" hidden>Continue <span aria-hidden="true">→</span></button>
     </div>
+    <button id="btn-easier" class="tool-btn easier" hidden aria-label="Jump to a smaller grid" title="Jump to the nearest smaller grid (E)">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="3" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="15" y="15" width="6" height="6" rx="1.5" fill="currentColor"/><path d="M13 13l3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Easier</span>
+    </button>
+    <div class="zoom-stack" role="group" aria-label="Zoom">
+      <button id="btn-zoom-in" class="tool-btn" aria-label="Zoom in" title="Zoom in (+)">+</button>
+      <button id="btn-zoom-out" class="tool-btn" aria-label="Zoom out" title="Zoom out (−)">−</button>
+      <button id="btn-fit" class="tool-btn" aria-label="Fit zone" title="Fit zone (F)">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
     <div id="toast" role="status" aria-live="polite"></div>
     <div id="banner" role="status" aria-live="polite">
       <div class="banner-title"></div>
@@ -44,7 +55,8 @@
         </div>
         <p>Drag across cells to draw a rectangle. Tap a rectangle to remove it. Tap a <b>1</b> to fill it.</p>
         <p>Solve a zone to unlock its neighbours, then hit <b>Continue</b> to glide to the next one. The world never ends, and it gets harder the further you travel.</p>
-        <p>Far out, the world expands into bigger zones (12×12, 16×16, 20×20). A bigger zone only unlocks once <b>every zone along one of its sides</b> is solved.</p>
+        <p>The deeper you go, the bigger the zones: 6×6, 8×8, 10×10, 12×12, 15×15, 16×16, 18×18, 20×20, then 24×24. Where the size steps up, a zone unlocks only when <b>every zone along one side</b> is solved, <b>plus one diagonal zone</b> past that side's corner.</p>
+        <p class="muted">Use + / − / fit to zoom. If a zone is too tough, tap <b>Easier</b> to jump to the nearest smaller grid.</p>
         <p class="muted">Drag on empty space to pan. Pinch or scroll to zoom. Progress saves automatically on this device.</p>
         <button class="primary" data-close>Let's go</button>
       </div>

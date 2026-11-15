@@ -3,7 +3,7 @@ import type { ZoneCache } from './zones';
 import { World } from './world';
 import { rectContains, type Puzzle, type Rect } from './types';
 import { hashInts } from './rng';
-import { SIDES, edgeNeighbours, sharedSpan, zonesInRect, type Side, type Zone } from './layout';
+import { SIDES, diagonalZones, edgeNeighbours, sharedSpan, zonesInRect, type Side, type Zone } from './layout';
 
 export interface Camera {
   x: number; // world cell coordinate at screen centre
@@ -160,10 +160,10 @@ export class Renderer {
               c.fill();
             }
         }
-        if (near && s >= 6) {
-          const lockSize = Math.max(s * 0.9, Math.min(whole.w * 0.12, 48));
+        if (near && whole.w >= 18) {
+          const lockSize = Math.max(Math.min(s * 0.9, whole.w * 0.3), Math.min(whole.w * 0.12, 48));
           this.lock(whole.x + whole.w / 2, whole.y + whole.h / 2, lockSize);
-          if (z.tier > 0) this.sideProgress(cam, world, z, whole, lockSize);
+          this.sideProgress(cam, world, z, whole, lockSize);
         }
         continue;
       }
@@ -185,7 +185,12 @@ export class Renderer {
         this.rr(whole.x - s * 0.06, whole.y - s * 0.06, whole.w + s * 0.12, whole.h + s * 0.12, rad * 2);
         c.stroke();
         const clueSet = new Set(p.clues.map((q) => q.r * z.size + q.c));
-        for (let r = 0; r < z.size; r++)
+        if (s < 7) {
+          // far zoom: one tile instead of every cell
+          c.fillStyle = this.colors.cell;
+          this.rr(whole.x, whole.y, whole.w, whole.h, rad * 2);
+          c.fill();
+        } else for (let r = 0; r < z.size; r++)
           for (let cc = 0; cc < z.size; cc++) {
             const b = this.box(cam, z, { r, c: cc, w: 1, h: 1 }, inset);
             c.fillStyle = clueSet.has(r * z.size + cc) ? this.colors.cellClue : this.colors.cell;
@@ -260,7 +265,10 @@ export class Renderer {
     return animating;
   }
 
-  /** On a locked super zone: light the parts of each side whose neighbours are solved, and show "n/m". */
+  /**
+   * On a locked zone whose unlock needs a whole side + 1 diagonal: light the solved
+   * parts of the best side, mark its diagonal zones with pips, and show "n/m + ◆".
+   */
   private sideProgress(
     cam: Camera,
     world: World,
@@ -268,46 +276,60 @@ export class Renderer {
     whole: { x: number; y: number; w: number; h: number },
     lockSize: number,
   ) {
+    const st = world.bestStepSide(z);
+    if (!st || (st.solved === 0 && !st.diagSolved)) return;
     const c = this.ctx;
-    const nb = edgeNeighbours(z);
+    const side = st.side;
     const lw = Math.max(2, cam.zoom * 0.12);
-    let best: [number, number] = [0, 1];
-    for (const side of SIDES) {
-      const list = nb[side];
-      const solved = list.filter((n) => world.isSolved(n)).length;
-      if (solved === 0) continue;
-      if (solved / list.length > best[0] / best[1]) best = [solved, list.length];
-      for (const n of list) {
-        const [a, b] = sharedSpan(z, n, side);
-        const lit = world.isSolved(n);
-        c.strokeStyle = lit ? 'rgba(255,207,110,0.85)' : 'rgba(255,255,255,0.12)';
-        c.lineWidth = lw;
-        c.lineCap = 'round';
-        c.beginPath();
-        if (side === 'l' || side === 'r') {
-          const x = side === 'l' ? whole.x + lw : whole.x + whole.w - lw;
-          const [, y0] = this.toScreen(cam, 0, a);
-          const [, y1] = this.toScreen(cam, 0, b);
-          c.moveTo(x, Math.max(whole.y + lw * 2, y0 + lw * 2));
-          c.lineTo(x, Math.min(whole.y + whole.h - lw * 2, y1 - lw * 2));
-        } else {
-          const y = side === 't' ? whole.y + lw : whole.y + whole.h - lw;
-          const [x0] = this.toScreen(cam, a, 0);
-          const [x1] = this.toScreen(cam, b, 0);
-          c.moveTo(Math.max(whole.x + lw * 2, x0 + lw * 2), y);
-          c.lineTo(Math.min(whole.x + whole.w - lw * 2, x1 - lw * 2), y);
-        }
-        c.stroke();
+    const gold = 'rgba(255,207,110,0.85)';
+    const dim = 'rgba(255,255,255,0.14)';
+    c.lineCap = 'round';
+    c.lineWidth = lw;
+    const vertical = side === 'l' || side === 'r';
+    const edge = side === 'l' ? whole.x + lw : side === 'r' ? whole.x + whole.w - lw : side === 't' ? whole.y + lw : whole.y + whole.h - lw;
+    for (const n of edgeNeighbours(z)[side]) {
+      const [a, b] = sharedSpan(z, n, side);
+      c.strokeStyle = world.isSolved(n) ? gold : dim;
+      c.beginPath();
+      if (vertical) {
+        const [, y0] = this.toScreen(cam, 0, a);
+        const [, y1] = this.toScreen(cam, 0, b);
+        c.moveTo(edge, Math.max(whole.y + lw * 3, y0 + lw * 2));
+        c.lineTo(edge, Math.min(whole.y + whole.h - lw * 3, y1 - lw * 2));
+      } else {
+        const [x0] = this.toScreen(cam, a, 0);
+        const [x1] = this.toScreen(cam, b, 0);
+        c.moveTo(Math.max(whole.x + lw * 3, x0 + lw * 2), edge);
+        c.lineTo(Math.min(whole.x + whole.w - lw * 3, x1 - lw * 2), edge);
       }
+      c.stroke();
     }
-    if (best[0] > 0) {
-      const fs = Math.max(11, lockSize * 0.42);
-      c.font = `700 ${fs}px ui-rounded, system-ui, sans-serif`;
-      c.fillStyle = 'rgba(255,207,110,0.85)';
-      c.textAlign = 'center';
-      c.textBaseline = 'middle';
-      c.fillText(`${best[0]}/${best[1]}`, whole.x + whole.w / 2, whole.y + whole.h / 2 + lockSize * 0.75);
-    }
+    // diagonal pips at both ends of the side
+    const pip = Math.max(3, lw * 1.1);
+    const ends: [number, number][] = vertical
+      ? [[edge, whole.y + pip * 1.2], [edge, whole.y + whole.h - pip * 1.2]]
+      : [[whole.x + pip * 1.2, edge], [whole.x + whole.w - pip * 1.2, edge]];
+    const diags = diagonalZones(z, side);
+    ends.forEach(([x, y], i) => {
+      c.fillStyle = world.isSolved(diags[i]) ? gold : dim;
+      c.beginPath();
+      c.moveTo(x, y - pip);
+      c.lineTo(x + pip, y);
+      c.lineTo(x, y + pip);
+      c.lineTo(x - pip, y);
+      c.closePath();
+      c.fill();
+    });
+    const fs = Math.max(11, lockSize * 0.42);
+    c.font = `700 ${fs}px ui-rounded, system-ui, sans-serif`;
+    c.fillStyle = gold;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(
+      `${st.solved}/${st.total} + ${st.diagSolved ? '◆' : '◇'}`,
+      whole.x + whole.w / 2,
+      whole.y + whole.h / 2 + lockSize * 0.8,
+    );
   }
 
   private lock(x: number, y: number, size: number) {

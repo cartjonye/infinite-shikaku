@@ -2,16 +2,16 @@
 import { zoneByKey } from './layout';
 import type { Rect } from './types';
 
-export const SAVE_KEY = 'infinite-shikaku:v2';
-const LEGACY_KEY = 'infinite-shikaku:v1';
-export const SAVE_VERSION = 2;
+export const SAVE_KEY = 'infinite-shikaku:v3';
+const LEGACY_KEYS = ['infinite-shikaku:v1', 'infinite-shikaku:v2'];
+export const SAVE_VERSION = 3;
 
 export interface Stats {
   zonesSolved: number;
   totalSolveMs: number;
   bestMs: number | null;
   lastMs: number | null;
-  farthest: number;
+  deepest: number;
   totalPlayMs: number;
 }
 
@@ -35,7 +35,7 @@ export const emptyStats = (): Stats => ({
   totalSolveMs: 0,
   bestMs: null,
   lastMs: null,
-  farthest: 0,
+  deepest: 0,
   totalPlayMs: 0,
 });
 
@@ -49,7 +49,7 @@ export function freshSave(): SaveData {
     cam: null,
     stats: emptyStats(),
     seenHelp: false,
-    seenSizes: [8],
+    seenSizes: [6],
   };
 }
 
@@ -75,11 +75,6 @@ function sanitize(d: SaveData): SaveData {
   return d;
 }
 
-/** v1 (all zones 8×8) → v2 (concentric tiers). 8×8 keys near the centre carry over unchanged. */
-function migrateV1(d: any): SaveData {
-  return sanitize({ ...freshSave(), ...d, v: SAVE_VERSION, seenSizes: [8], stats: { ...emptyStats(), ...d.stats } });
-}
-
 function read(key: string): any {
   try {
     const raw = localStorage.getItem(key);
@@ -89,24 +84,33 @@ function read(key: string): any {
   }
 }
 
+/**
+ * Older saves (v1, v2) used a different world layout and are wiped entirely.
+ * Only the "seen the tutorial" flag carries over.
+ */
+function dropLegacy(): boolean {
+  let seenHelp = false;
+  for (const k of LEGACY_KEYS) {
+    const d = read(k);
+    if (d?.seenHelp) seenHelp = true;
+    try {
+      localStorage.removeItem(k);
+    } catch {
+      /* ignore */
+    }
+  }
+  return seenHelp;
+}
+
 export function loadSave(): SaveData {
+  const legacySeenHelp = dropLegacy();
   const d = read(SAVE_KEY);
   if (isValid(d, SAVE_VERSION)) {
     return sanitize({ ...freshSave(), ...d, stats: { ...emptyStats(), ...d.stats } });
   }
-  const old = read(LEGACY_KEY);
-  if (isValid(old, 1)) {
-    const migrated = migrateV1(old);
-    if (writeSave(migrated)) {
-      try {
-        localStorage.removeItem(LEGACY_KEY);
-      } catch {
-        /* ignore */
-      }
-    }
-    return migrated;
-  }
-  return freshSave();
+  const fresh = freshSave();
+  fresh.seenHelp = legacySeenHelp;
+  return fresh;
 }
 
 export function writeSave(d: SaveData): boolean {

@@ -4,11 +4,11 @@
  */
 import { hashInts, mulberry32, pickWeighted, randInt, type Rng } from './rng';
 import { solve } from './solver';
-import { ZONE, type Clue, type Puzzle, type Rect } from './types';
-import { zoneDistance } from './layout';
+import type { Clue, Puzzle, Rect } from './types';
+import { zoneDepth } from './layout';
 
 export interface Difficulty {
-  level: number;
+  depth: number;
   maxArea: number;
   /** weight multiplier for tiny (1-2 cell) rectangles */
   smallWeight: number;
@@ -18,16 +18,14 @@ export interface Difficulty {
   allowSearch: boolean;
 }
 
-export function difficultyFor(distance: number, size = ZONE): Difficulty {
-  const t = Math.min(1, distance / 12);
-  // bigger zones allow proportionally bigger rectangles
-  const scale = 1 + (size - ZONE) / 16;
+export function difficultyFor(depth: number, size: number): Difficulty {
+  const t = Math.min(1, (depth - 1) / 33);
   return {
-    level: distance + 1,
-    maxArea: Math.round((6 + 10 * t) * scale),
+    depth,
+    maxArea: Math.max(4, Math.round(size * (0.9 + 0.6 * t))),
     smallWeight: 0.35 - 0.3 * t,
     bigBias: 0.5 + 2.5 * t,
-    allowSearch: distance >= 6,
+    allowSearch: depth >= 10,
   };
 }
 
@@ -82,17 +80,13 @@ export interface ZoneSpec {
   size: number;
 }
 
-/** Seed for one generation attempt. 8×8 zones keep their original seeding so old saves stay valid. */
 function attemptSeed(worldSeed: number, z: ZoneSpec, attempt: number) {
-  return z.size === ZONE
-    ? hashInts(worldSeed, z.x0 / ZONE, z.y0 / ZONE, attempt)
-    : hashInts(worldSeed, z.x0, z.y0, z.size * 7919 + attempt);
+  return hashInts(worldSeed, z.x0, z.y0, z.size * 7919 + attempt);
 }
 
 export function generateZone(worldSeed: number, z: ZoneSpec): Puzzle {
   const n = z.size;
-  const dist = zoneDistance(z);
-  const base = difficultyFor(dist, n);
+  const base = difficultyFor(zoneDepth(z), n);
   for (let attempt = 0; attempt < 4000; attempt++) {
     // relax constraints gradually if we struggle
     const d: Difficulty =
