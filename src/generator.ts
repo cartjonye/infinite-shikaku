@@ -5,6 +5,7 @@
 import { hashInts, mulberry32, pickWeighted, randInt, type Rng } from './rng';
 import { solve } from './solver';
 import { ZONE, type Clue, type Puzzle, type Rect } from './types';
+import { zoneDistance } from './layout';
 
 export interface Difficulty {
   level: number;
@@ -17,13 +18,13 @@ export interface Difficulty {
   allowSearch: boolean;
 }
 
-export const zoneDistance = (zx: number, zy: number) => Math.abs(zx) + Math.abs(zy);
-
-export function difficultyFor(distance: number): Difficulty {
+export function difficultyFor(distance: number, size = ZONE): Difficulty {
   const t = Math.min(1, distance / 12);
+  // bigger zones allow proportionally bigger rectangles
+  const scale = 1 + (size - ZONE) / 16;
   return {
     level: distance + 1,
-    maxArea: Math.round(6 + 10 * t),
+    maxArea: Math.round((6 + 10 * t) * scale),
     smallWeight: 0.35 - 0.3 * t,
     bigBias: 0.5 + 2.5 * t,
     allowSearch: distance >= 6,
@@ -75,14 +76,28 @@ function placeClues(rng: Rng, rects: Rect[]): Clue[] {
   }));
 }
 
-export function generateZone(worldSeed: number, zx: number, zy: number, n = ZONE): Puzzle {
-  const dist = zoneDistance(zx, zy);
-  const base = difficultyFor(dist);
+export interface ZoneSpec {
+  x0: number;
+  y0: number;
+  size: number;
+}
+
+/** Seed for one generation attempt. 8×8 zones keep their original seeding so old saves stay valid. */
+function attemptSeed(worldSeed: number, z: ZoneSpec, attempt: number) {
+  return z.size === ZONE
+    ? hashInts(worldSeed, z.x0 / ZONE, z.y0 / ZONE, attempt)
+    : hashInts(worldSeed, z.x0, z.y0, z.size * 7919 + attempt);
+}
+
+export function generateZone(worldSeed: number, z: ZoneSpec): Puzzle {
+  const n = z.size;
+  const dist = zoneDistance(z);
+  const base = difficultyFor(dist, n);
   for (let attempt = 0; attempt < 4000; attempt++) {
     // relax constraints gradually if we struggle
     const d: Difficulty =
       attempt < 1500 ? base : { ...base, maxArea: Math.max(4, base.maxArea - Math.floor(attempt / 1500)) };
-    const rng = mulberry32(hashInts(worldSeed, zx, zy, attempt));
+    const rng = mulberry32(attemptSeed(worldSeed, z, attempt));
     const rects = partition(rng, n, d);
     if (rects.length < 3) continue;
     for (let place = 0; place < 6; place++) {

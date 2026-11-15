@@ -1,13 +1,12 @@
 /**
  * Shikaku solver: candidate enumeration + constraint propagation + backtracking.
- * Grids up to 64 cells; cell sets are stored as two 32-bit masks.
+ * Cell sets are word bitsets (Uint32Array), so any grid size works.
  */
 import type { Clue, Rect } from './types';
 
 interface Cand {
   rect: Rect;
-  lo: number;
-  hi: number;
+  m: Uint32Array;
 }
 
 export interface SolveResult {
@@ -17,43 +16,26 @@ export interface SolveResult {
   needsSearch: boolean;
   /** first solution found, indexed like the clues */
   solution: Rect[] | null;
-}
-
-function bit(i: number): [number, number] {
-  return i < 32 ? [(1 << i) >>> 0, 0] : [0, (1 << (i - 32)) >>> 0];
-}
-
-function maskOf(rect: Rect, cols: number): [number, number] {
-  let lo = 0;
-  let hi = 0;
-  for (let r = rect.r; r < rect.r + rect.h; r++) {
-    for (let c = rect.c; c < rect.c + rect.w; c++) {
-      const [l, h] = bit(r * cols + c);
-      lo |= l;
-      hi |= h;
-    }
-  }
-  return [lo >>> 0, hi >>> 0];
+  /** a second, different solution when count >= 2 */
+  alternative: Rect[] | null;
 }
 
 export function candidatesFor(clues: Clue[], rows: number, cols: number): Rect[][] {
-  const clueAt = new Map<number, number>();
-  clues.forEach((k, i) => clueAt.set(k.r * cols + k.c, i));
+  const clueAt = new Int32Array(rows * cols).fill(-1);
+  clues.forEach((k, i) => (clueAt[k.r * cols + k.c] = i));
   return clues.map((k, idx) => {
     const out: Rect[] = [];
     for (let h = 1; h <= k.v; h++) {
       if (k.v % h) continue;
       const w = k.v / h;
       if (h > rows || w > cols) continue;
-      for (let r0 = k.r - h + 1; r0 <= k.r; r0++) {
-        if (r0 < 0 || r0 + h > rows) continue;
-        for (let c0 = k.c - w + 1; c0 <= k.c; c0++) {
-          if (c0 < 0 || c0 + w > cols) continue;
+      for (let r0 = Math.max(0, k.r - h + 1); r0 <= k.r && r0 + h <= rows; r0++) {
+        for (let c0 = Math.max(0, k.c - w + 1); c0 <= k.c && c0 + w <= cols; c0++) {
           let ok = true;
           for (let r = r0; r < r0 + h && ok; r++) {
             for (let c = c0; c < c0 + w; c++) {
-              const j = clueAt.get(r * cols + c);
-              if (j !== undefined && j !== idx) {
+              const j = clueAt[r * cols + c];
+              if (j >= 0 && j !== idx) {
                 ok = false;
                 break;
               }
@@ -67,41 +49,45 @@ export function candidatesFor(clues: Clue[], rows: number, cols: number): Rect[]
   });
 }
 
-export function solve(
-  clues: Clue[],
-  rows: number,
-  cols: number,
-  limit = 2,
-): SolveResult {
+export function solve(clues: Clue[], rows: number, cols: number, limit = 2): SolveResult {
   const n = rows * cols;
+  const W = (n + 31) >>> 5;
   const total = clues.reduce((s, k) => s + k.v, 0);
-  if (total !== n || n > 64) return { count: 0, needsSearch: false, solution: null };
+  const none: SolveResult = { count: 0, needsSearch: false, solution: null, alternative: null };
+  if (total !== n) return none;
 
   const cands: Cand[][] = candidatesFor(clues, rows, cols).map((list) =>
     list.map((rect) => {
-      const [lo, hi] = maskOf(rect, cols);
-      return { rect, lo, hi };
+      const m = new Uint32Array(W);
+      for (let r = rect.r; r < rect.r + rect.h; r++)
+        for (let c = rect.c; c < rect.c + rect.w; c++) {
+          const i = r * cols + c;
+          m[i >>> 5] |= 1 << (i & 31);
+        }
+      return { rect, m };
     }),
   );
-  const cellBits: [number, number][] = [];
-  for (let i = 0; i < n; i++) cellBits.push(bit(i));
+  const K = clues.length;
 
   let count = 0;
-  let solution: Rect[] | null = null;
+  const found: Rect[][] = [];
   let searched = false;
 
-  // returns false on contradiction
-  function propagate(
-    lists: Cand[][],
-    assigned: (Cand | null)[],
-    cov: [number, number],
-  ): boolean {
+  const overlaps = (a: Uint32Array, b: Uint32Array) => {
+    for (let w = 0; w < W; w++) if (a[w] & b[w]) return true;
+    return false;
+  };
+  const once = new Uint32Array(W);
+  const twice = new Uint32Array(W);
+  const uni = new Uint32Array(W);
+
+  function propagate(lists: Cand[][], assigned: (Cand | null)[], cov: Uint32Array): boolean {
     let changed = true;
     while (changed) {
       changed = false;
-      for (let i = 0; i < lists.length; i++) {
+      for (let i = 0; i < K; i++) {
         if (assigned[i]) continue;
-        const filtered = lists[i].filter((c) => !((c.lo & cov[0]) | (c.hi & cov[1])));
+        const filtered = lists[i].filter((c) => !overlaps(c.m, cov));
         if (filtered.length !== lists[i].length) {
           lists[i] = filtered;
           changed = true;
@@ -109,30 +95,44 @@ export function solve(
         if (filtered.length === 0) return false;
         if (filtered.length === 1) {
           assigned[i] = filtered[0];
-          cov[0] = (cov[0] | filtered[0].lo) >>> 0;
-          cov[1] = (cov[1] | filtered[0].hi) >>> 0;
+          for (let w = 0; w < W; w++) cov[w] |= filtered[0].m[w];
           changed = true;
         }
       }
-      // each uncovered cell must be claimable by some unassigned clue
-      for (let cell = 0; cell < n; cell++) {
-        const [bl, bh] = cellBits[cell];
-        if ((cov[0] & bl) | (cov[1] & bh)) continue;
-        let owner = -1;
-        let owners = 0;
-        for (let i = 0; i < lists.length && owners < 2; i++) {
-          if (assigned[i]) continue;
-          if (lists[i].some((c) => (c.lo & bl) | (c.hi & bh))) {
-            owner = i;
-            owners++;
-          }
+      if (changed) continue;
+      // which uncovered cells can be claimed by exactly one / no clue?
+      once.fill(0);
+      twice.fill(0);
+      const unions: Uint32Array[] = [];
+      for (let i = 0; i < K; i++) {
+        if (assigned[i]) {
+          unions.push(uni);
+          continue;
         }
-        if (owners === 0) return false;
-        if (owners === 1) {
-          const filtered = lists[owner].filter((c) => (c.lo & bl) | (c.hi & bh));
-          if (filtered.length !== lists[owner].length) {
-            lists[owner] = filtered;
-            changed = true;
+        const u = new Uint32Array(W);
+        for (const c of lists[i]) for (let w = 0; w < W; w++) u[w] |= c.m[w];
+        unions.push(u);
+        for (let w = 0; w < W; w++) {
+          twice[w] |= once[w] & u[w];
+          once[w] |= u[w];
+        }
+      }
+      for (let w = 0; w < W; w++) {
+        const bitsInGrid = w === W - 1 && n & 31 ? (1 << (n & 31)) - 1 : 0xffffffff;
+        const free = ~cov[w] & bitsInGrid;
+        if (free & ~once[w]) return false;
+        let single = (free & once[w] & ~twice[w]) >>> 0;
+        while (single) {
+          const b = single & -single;
+          single = (single ^ b) >>> 0;
+          for (let i = 0; i < K; i++) {
+            if (assigned[i] || !(unions[i][w] & b)) continue;
+            const filtered = lists[i].filter((c) => c.m[w] & b);
+            if (filtered.length !== lists[i].length) {
+              lists[i] = filtered;
+              changed = true;
+            }
+            break;
           }
         }
       }
@@ -140,17 +140,17 @@ export function solve(
     return true;
   }
 
-  function rec(lists: Cand[][], assigned: (Cand | null)[], cov: [number, number], depth: number) {
+  function rec(lists: Cand[][], assigned: (Cand | null)[], cov: Uint32Array, depth: number) {
     if (count >= limit) return;
     if (!propagate(lists, assigned, cov)) return;
     let best = -1;
-    for (let i = 0; i < lists.length; i++) {
+    for (let i = 0; i < K; i++) {
       if (assigned[i]) continue;
       if (best < 0 || lists[i].length < lists[best].length) best = i;
     }
     if (best < 0) {
       count++;
-      if (!solution) solution = assigned.map((a) => a!.rect);
+      found.push(assigned.map((a) => a!.rect));
       return;
     }
     if (depth === 0) searched = true;
@@ -160,15 +160,17 @@ export function solve(
       const a2 = assigned.slice();
       a2[best] = choice;
       l2[best] = [choice];
-      rec(l2, a2, [(cov[0] | choice.lo) >>> 0, (cov[1] | choice.hi) >>> 0], depth + 1);
+      const c2 = cov.slice();
+      for (let w = 0; w < W; w++) c2[w] |= choice.m[w];
+      rec(l2, a2, c2, depth + 1);
     }
   }
 
   rec(
     cands.map((l) => l.slice()),
     clues.map(() => null),
-    [0, 0],
+    new Uint32Array(W),
     0,
   );
-  return { count, needsSearch: searched, solution };
+  return { count, needsSearch: searched, solution: found[0] ?? null, alternative: found[1] ?? null };
 }

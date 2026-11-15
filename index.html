@@ -29,6 +29,10 @@
       <button id="continue" hidden>Continue <span aria-hidden="true">→</span></button>
     </div>
     <div id="toast" role="status" aria-live="polite"></div>
+    <div id="banner" role="status" aria-live="polite">
+      <div class="banner-title"></div>
+      <div class="banner-sub"></div>
+    </div>
 
     <div id="help-modal" class="modal" hidden>
       <div class="sheet">
@@ -40,6 +44,7 @@
         </div>
         <p>Drag across cells to draw a rectangle. Tap a rectangle to remove it. Tap a <b>1</b> to fill it.</p>
         <p>Solve a zone to unlock its neighbours, then hit <b>Continue</b> to glide to the next one. The world never ends, and it gets harder the further you travel.</p>
+        <p>Far out, the world expands into bigger zones (12×12, 16×16, 20×20). A bigger zone only unlocks once <b>every zone along one of its sides</b> is solved.</p>
         <p class="muted">Drag on empty space to pan. Pinch or scroll to zoom. Progress saves automatically on this device.</p>
         <button class="primary" data-close>Let's go</button>
       </div>

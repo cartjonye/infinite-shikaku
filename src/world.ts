@@ -1,19 +1,16 @@
 /** World state: which zones are unlocked/solved and what the player has drawn. */
-import { zoneDistance } from './generator';
+import {
+  ORIGIN,
+  SIDES,
+  edgeNeighbours,
+  zoneByKey,
+  zoneCenter,
+  zoneDistance,
+  type Side,
+  type Zone,
+} from './layout';
 import type { SaveData } from './storage';
-import { ZONE, rectArea, rectContains, rectsOverlap, type Puzzle, type Rect } from './types';
-
-export const zkey = (zx: number, zy: number) => `${zx},${zy}`;
-export const parseKey = (k: string): [number, number] => {
-  const [a, b] = k.split(',').map(Number);
-  return [a, b];
-};
-export const NEIGHBORS: [number, number][] = [
-  [1, 0],
-  [-1, 0],
-  [0, 1],
-  [0, -1],
-];
+import { rectArea, rectContains, rectsOverlap, type Puzzle, type Rect } from './types';
 
 export type ZoneStatus = 'locked' | 'open' | 'solved';
 
@@ -24,16 +21,41 @@ export class World {
     this.solved = new Set(save.solved);
   }
 
-  status(zx: number, zy: number): ZoneStatus {
-    const k = zkey(zx, zy);
-    if (this.solved.has(k)) return 'solved';
-    if (zx === 0 && zy === 0) return 'open';
-    for (const [dx, dy] of NEIGHBORS) if (this.solved.has(zkey(zx + dx, zy + dy))) return 'open';
+  isSolved(z: Zone) {
+    return this.solved.has(z.key);
+  }
+
+  /** For each side: how many of the zones along it are solved, out of how many. */
+  sideProgress(z: Zone): Record<Side, [number, number]> {
+    const nb = edgeNeighbours(z);
+    const out = {} as Record<Side, [number, number]>;
+    for (const s of SIDES) out[s] = [nb[s].filter((n) => this.solved.has(n.key)).length, nb[s].length];
+    return out;
+  }
+
+  /**
+   * 8×8 zones open when any edge neighbour is solved.
+   * Bigger ("super") zones open only when every neighbour along at least one whole side is solved.
+   */
+  status(z: Zone): ZoneStatus {
+    if (this.solved.has(z.key)) return 'solved';
+    if (z === ORIGIN) return 'open';
+    const nb = edgeNeighbours(z);
+    if (z.tier === 0) {
+      for (const s of SIDES) if (nb[s].some((n) => this.solved.has(n.key))) return 'open';
+      return 'locked';
+    }
+    for (const s of SIDES) if (nb[s].every((n) => this.solved.has(n.key))) return 'open';
     return 'locked';
   }
 
   rects(k: string): Rect[] {
     return this.save.rects[k] ?? [];
+  }
+
+  /** Rectangles to display: the solution for solved zones, the player's drawing otherwise. */
+  shownRects(z: Zone, p: Puzzle): Rect[] {
+    return this.solved.has(z.key) ? p.solution : this.rects(z.key);
   }
 
   /** Place a rectangle, replacing any overlapping ones. */
@@ -53,10 +75,6 @@ export class World {
     return true;
   }
 
-  rectAt(k: string, r: number, c: number): Rect | undefined {
-    return this.rects(k).find((q) => rectContains(q, r, c));
-  }
-
   /** Index of the single clue a rect satisfies, or -1. */
   static matchClue(p: Puzzle, q: Rect): number {
     let found = -1;
@@ -71,54 +89,55 @@ export class World {
     return found;
   }
 
-  isComplete(k: string, p: Puzzle): boolean {
-    const list = this.rects(k);
+  isComplete(z: Zone, p: Puzzle): boolean {
+    const list = this.rects(z.key);
     let area = 0;
     for (const q of list) {
       if (World.matchClue(p, q) < 0) return false;
       area += rectArea(q);
     }
-    return area === ZONE * ZONE && list.length === p.clues.length;
+    return area === z.size * z.size && list.length === p.clues.length;
   }
 
-  markSolved(k: string, p: Puzzle) {
-    this.solved.add(k);
+  markSolved(z: Zone, _p?: Puzzle) {
+    this.solved.add(z.key);
     this.save.solved = [...this.solved];
-    this.solvedAt.set(k, performance.now());
-    // keep the player's tiling (it is the solution) for display
-    this.save.rects[k] = p.solution.map((q) => ({ ...q }));
-    delete this.save.timers[k];
-    const [zx, zy] = parseKey(k);
-    this.save.stats.farthest = Math.max(this.save.stats.farthest, zoneDistance(zx, zy));
+    this.solvedAt.set(z.key, performance.now());
+    // solved zones render from the (deterministic) solution, so no need to store their rects
+    delete this.save.rects[z.key];
+    delete this.save.timers[z.key];
+    this.save.stats.farthest = Math.max(this.save.stats.farthest, zoneDistance(z));
   }
 
   /** All open zones: unlocked but not yet solved. */
-  openZones(): [number, number][] {
-    const out: [number, number][] = [];
+  openZones(): Zone[] {
+    const out: Zone[] = [];
     const seen = new Set<string>();
-    const consider = (x: number, y: number) => {
-      const k = zkey(x, y);
-      if (seen.has(k)) return;
-      seen.add(k);
-      if (this.status(x, y) === 'open') out.push([x, y]);
+    const consider = (z: Zone) => {
+      if (seen.has(z.key)) return;
+      seen.add(z.key);
+      if (this.status(z) === 'open') out.push(z);
     };
-    consider(0, 0);
+    consider(ORIGIN);
     for (const k of this.solved) {
-      const [x, y] = parseKey(k);
-      for (const [dx, dy] of NEIGHBORS) consider(x + dx, y + dy);
+      const z = zoneByKey(k);
+      if (!z) continue;
+      const nb = edgeNeighbours(z);
+      for (const s of SIDES) nb[s].forEach(consider);
     }
     return out;
   }
 
-  /** Nearest open zone to (fx, fy); ties prefer zones closer to the origin. */
-  nearestOpen(fx: number, fy: number): [number, number] | null {
-    let best: [number, number] | null = null;
+  /** Nearest open zone to a world point; ties prefer zones closer to the origin. */
+  nearestOpen(wx: number, wy: number): Zone | null {
+    let best: Zone | null = null;
     let bestD = Infinity;
-    for (const [x, y] of this.openZones()) {
-      const d = Math.hypot(x - fx, y - fy) + zoneDistance(x, y) * 0.001;
+    for (const z of this.openZones()) {
+      const [cx, cy] = zoneCenter(z);
+      const d = Math.hypot(cx - wx, cy - wy) + zoneDistance(z) * 0.001;
       if (d < bestD) {
         bestD = d;
-        best = [x, y];
+        best = z;
       }
     }
     return best;

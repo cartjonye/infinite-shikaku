@@ -1,9 +1,20 @@
 import './style.css';
-import { difficultyFor, zoneDistance } from './generator';
+import { difficultyFor } from './generator';
+import {
+  ORIGIN,
+  SIDES,
+  TIERS,
+  edgeNeighbours,
+  zoneAtCell,
+  zoneByKey,
+  zoneCenter,
+  zoneDistance,
+  type Zone,
+} from './layout';
 import { Renderer, type Camera, type Preview } from './render';
 import { clearSave, freshSave, loadSave, writeSave, type SaveData } from './storage';
-import { ZONE, type Rect } from './types';
-import { NEIGHBORS, World, zkey } from './world';
+import type { Rect } from './types';
+import { World } from './world';
 import { ZoneCache } from './zones';
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -18,10 +29,16 @@ let zones = new ZoneCache(save.seed, () => (dirty = true));
 
 const MIN_ZOOM = 6;
 const MAX_ZOOM = 140;
-let cam: Camera = { x: ZONE / 2, y: ZONE / 2, zoom: 40 };
-let camAnim: { from: Camera; to: Camera; t0: number; dur: number } | null = null;
+let cam: Camera = { x: 4, y: 4, zoom: 40 };
+interface CamStep {
+  to: Camera;
+  dur: number;
+  hold?: number;
+}
+let camAnim: { from: Camera; to: Camera; t0: number; dur: number; hold: number } | null = null;
+let camQueue: CamStep[] = [];
 let preview: Preview | null = null;
-let lastInteracted: [number, number] | null = null;
+let lastInteracted: Zone | null = null;
 
 // ---------- persistence ----------
 let saveTimer: number | undefined;
@@ -41,29 +58,43 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', saveNow);
 
 // ---------- camera helpers ----------
-function fitZoom() {
+/** Zoom that fits a span of `cells` on screen, leaving room for the HUD. */
+function fitZoom(cells = 8) {
   const usableH = renderer.h - 150;
-  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.min(renderer.w - 24, usableH) / (ZONE + 0.6)));
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.min(renderer.w - 24, usableH) / (cells + 0.6)));
 }
-function zoneCenter(zx: number, zy: number): [number, number] {
-  return [zx * ZONE + ZONE / 2, zy * ZONE + ZONE / 2];
+function camFor(z: Zone): Camera {
+  const [x, y] = zoneCenter(z);
+  const zoom = fitZoom(z.size);
+  return { x, y: y + 18 / zoom, zoom };
 }
-function flyTo(zx: number, zy: number) {
-  const [x, y] = zoneCenter(zx, zy);
-  camAnim = { from: { ...cam }, to: { x, y: y + 18 / fitZoom(), zoom: fitZoom() }, t0: performance.now(), dur: 650 };
+function playCam(steps: CamStep[]) {
+  camQueue = steps.slice();
+  nextCamStep();
+}
+function nextCamStep() {
+  const st = camQueue.shift();
+  camAnim = st ? { from: { ...cam }, to: st.to, t0: performance.now(), dur: st.dur, hold: st.hold ?? 0 } : null;
+}
+function flyTo(z: Zone) {
+  playCam([{ to: camFor(z), dur: 650 }]);
+}
+function stopCam() {
+  camAnim = null;
+  camQueue = [];
 }
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
-function centerZone(): [number, number] {
-  return [Math.floor(cam.x / ZONE), Math.floor(cam.y / ZONE)];
+function centerZone(): Zone {
+  return zoneAtCell(Math.floor(cam.x), Math.floor(cam.y));
 }
 
 /** The zone the player is working on: the open zone under the screen centre, else the last touched one if visible. */
-function focusZone(): [number, number] | null {
-  const [cx, cy] = centerZone();
-  if (world.status(cx, cy) === 'open') return [cx, cy];
-  if (lastInteracted && world.status(...lastInteracted) === 'open') {
-    const [x, y] = zoneCenter(...lastInteracted);
+function focusZone(): Zone | null {
+  const cz = centerZone();
+  if (world.status(cz) === 'open') return cz;
+  if (lastInteracted && world.status(lastInteracted) === 'open') {
+    const [x, y] = zoneCenter(lastInteracted);
     const [sx, sy] = renderer.toScreen(cam, x, y);
     if (sx > 0 && sx < renderer.w && sy > 0 && sy < renderer.h) return lastInteracted;
   }
@@ -79,7 +110,7 @@ const ptrs = new Map<number, Ptr>();
 type Mode =
   | { kind: 'none' }
   | { kind: 'pan'; moved: number }
-  | { kind: 'draw'; zx: number; zy: number; r0: number; c0: number; sx: number; sy: number; moved: boolean }
+  | { kind: 'draw'; zone: Zone; r0: number; c0: number; sx: number; sy: number; moved: boolean }
   | { kind: 'pinch'; d0: number; z0: number; wx: number; wy: number };
 let mode: Mode = { kind: 'none' };
 
@@ -87,9 +118,8 @@ function cellAt(sx: number, sy: number) {
   const [wx, wy] = renderer.toWorld(cam, sx, sy);
   const gx = Math.floor(wx);
   const gy = Math.floor(wy);
-  const zx = Math.floor(gx / ZONE);
-  const zy = Math.floor(gy / ZONE);
-  return { zx, zy, r: gy - zy * ZONE, c: gx - zx * ZONE, wx, wy };
+  const zone = zoneAtCell(gx, gy);
+  return { zone, r: gy - zone.y0, c: gx - zone.x0 };
 }
 
 function localPos(e: PointerEvent): Ptr {
@@ -111,7 +141,7 @@ canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   const p = localPos(e);
   ptrs.set(e.pointerId, p);
-  camAnim = null;
+  stopCam();
   if (ptrs.size === 2) return startPinch();
   if (ptrs.size > 2) return;
   if (e.pointerType === 'mouse' && e.button !== 0) {
@@ -119,10 +149,10 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
   const h = cellAt(p.x, p.y);
-  if (world.status(h.zx, h.zy) === 'open' && zones.get(h.zx, h.zy)) {
-    mode = { kind: 'draw', zx: h.zx, zy: h.zy, r0: h.r, c0: h.c, sx: p.x, sy: p.y, moved: false };
-    lastInteracted = [h.zx, h.zy];
-    preview = { zx: h.zx, zy: h.zy, rect: { r: h.r, c: h.c, w: 1, h: 1 } };
+  if (world.status(h.zone) === 'open' && zones.get(h.zone)) {
+    mode = { kind: 'draw', zone: h.zone, r0: h.r, c0: h.c, sx: p.x, sy: p.y, moved: false };
+    lastInteracted = h.zone;
+    preview = { zone: h.zone, rect: { r: h.r, c: h.c, w: 1, h: 1 } };
   } else {
     mode = { kind: 'pan', moved: 0 };
   }
@@ -151,8 +181,9 @@ canvas.addEventListener('pointermove', (e) => {
     dirty = true;
   } else if (mode.kind === 'draw') {
     const [wx, wy] = renderer.toWorld(cam, p.x, p.y);
-    const c = Math.max(0, Math.min(ZONE - 1, Math.floor(wx) - mode.zx * ZONE));
-    const r = Math.max(0, Math.min(ZONE - 1, Math.floor(wy) - mode.zy * ZONE));
+    const z = mode.zone;
+    const c = Math.max(0, Math.min(z.size - 1, Math.floor(wx) - z.x0));
+    const r = Math.max(0, Math.min(z.size - 1, Math.floor(wy) - z.y0));
     if (Math.hypot(p.x - mode.sx, p.y - mode.sy) > 6 || r !== mode.r0 || c !== mode.c0) mode.moved = true;
     const rect: Rect = {
       r: Math.min(r, mode.r0),
@@ -160,7 +191,7 @@ canvas.addEventListener('pointermove', (e) => {
       h: Math.abs(r - mode.r0) + 1,
       w: Math.abs(c - mode.c0) + 1,
     };
-    preview = { zx: mode.zx, zy: mode.zy, rect };
+    preview = { zone: z, rect };
     dirty = true;
   }
 });
@@ -175,8 +206,9 @@ function endPointer(e: PointerEvent, cancelled: boolean) {
     return;
   }
   if (mode.kind === 'draw' && !cancelled && preview) {
-    const k = zkey(mode.zx, mode.zy);
-    const p = zones.get(mode.zx, mode.zy)!;
+    const z = mode.zone;
+    const k = z.key;
+    const p = zones.get(z)!;
     if (!mode.moved) {
       // tap: remove an existing rectangle, or place a 1-cell clue
       if (!world.removeAt(k, mode.r0, mode.c0)) {
@@ -187,7 +219,7 @@ function endPointer(e: PointerEvent, cancelled: boolean) {
     } else {
       world.place(k, preview.rect);
     }
-    if (world.isComplete(k, p)) onSolved(mode.zx, mode.zy);
+    if (world.isComplete(z, p)) onSolved(z);
     scheduleSave();
   }
   if (mode.kind === 'pan') scheduleSave();
@@ -202,7 +234,7 @@ canvas.addEventListener(
   'wheel',
   (e) => {
     e.preventDefault();
-    camAnim = null;
+    stopCam();
     const b = canvas.getBoundingClientRect();
     const sx = e.clientX - b.left;
     const sy = e.clientY - b.top;
@@ -231,35 +263,71 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ---------- solving ----------
-function onSolved(zx: number, zy: number) {
-  const k = zkey(zx, zy);
-  const p = zones.get(zx, zy)!;
+function onSolved(z: Zone) {
+  const k = z.key;
+  const p = zones.get(z)!;
   const ms = save.timers[k] ?? 0;
-  world.markSolved(k, p);
+  const wasOpen = new Set(world.openZones().map((o) => o.key));
+  world.markSolved(z, p);
   const st = save.stats;
   st.zonesSolved++;
   st.totalSolveMs += ms;
   st.lastMs = ms;
   st.bestMs = st.bestMs === null ? ms : Math.min(st.bestMs, ms);
-  for (const [dx, dy] of NEIGHBORS) if (world.status(zx + dx, zy + dy) === 'open') zones.request(zx + dx, zy + dy);
+  const newlyOpen = world.openZones().filter((o) => !wasOpen.has(o.key));
+  for (const o of newlyOpen) zones.request(o);
+  const bigger = newlyOpen.find((o) => !save.seenSizes.includes(o.size));
+  if (bigger) {
+    save.seenSizes.push(bigger.size);
+    revealExpansion(z, bigger);
+  } else {
+    toast(`Zone solved in ${fmt(ms)}${st.bestMs === ms && st.zonesSolved > 1 ? ' · new best' : ''}`);
+  }
   saveNow();
-  toast(`Zone solved in ${fmt(ms)}${st.bestMs === ms && st.zonesSolved > 1 ? ' · new best' : ''}`);
   if (navigator.vibrate) {
     try {
-      navigator.vibrate(30);
+      navigator.vibrate(bigger ? [30, 60, 30] : 30);
     } catch {
       /* ignore */
     }
   }
 }
 
+/** First time a bigger zone size unlocks: banner, zoom out to show the new ring, then glide to it. */
+function revealExpansion(from: Zone, target: Zone) {
+  const [ax, ay] = zoneCenter(from);
+  const [bx, by] = zoneCenter(target);
+  // frame both zones plus a generous slice of the new ring
+  const span = Math.max(Math.abs(ax - bx), Math.abs(ay - by)) + target.size * 3;
+  const wide: Camera = { x: (ax + bx) / 2, y: (ay + by) / 2, zoom: Math.max(MIN_ZOOM, fitZoom(span)) };
+  lastInteracted = target;
+  playCam([
+    { to: wide, dur: 900, hold: 1400 },
+    { to: camFor(target), dur: 900 },
+  ]);
+  showBanner('The world expands', `${target.size}×${target.size} zones ahead`);
+}
+
+const bannerEl = $('#banner');
+let bannerTimer: number | undefined;
+function showBanner(title: string, sub: string) {
+  bannerEl.querySelector('.banner-title')!.textContent = title;
+  bannerEl.querySelector('.banner-sub')!.textContent = sub;
+  bannerEl.classList.remove('show');
+  void bannerEl.offsetWidth; // restart the animation
+  bannerEl.classList.add('show');
+  window.clearTimeout(bannerTimer);
+  bannerTimer = window.setTimeout(() => bannerEl.classList.remove('show'), 3200);
+}
+
 function doContinue() {
-  const [cx, cy] = focusZone() ?? lastInteracted ?? centerZone();
+  const from = focusZone() ?? lastInteracted ?? centerZone();
+  const [cx, cy] = zoneCenter(from);
   const target = world.nearestOpen(cx, cy);
   if (!target) return;
-  zones.request(...target);
+  zones.request(target);
   lastInteracted = target;
-  flyTo(...target);
+  flyTo(target);
 }
 
 // ---------- HUD ----------
@@ -289,13 +357,17 @@ function toast(msg: string) {
 function updateHud() {
   const f = focusZone();
   if (f) {
-    const d = zoneDistance(...f);
-    zoneLabel.textContent = `Zone ${f[0]}, ${f[1]} · Lv ${difficultyFor(d).level}`;
-    timerEl.textContent = fmt(save.timers[zkey(...f)] ?? 0);
+    zoneLabel.textContent = `Lv ${difficultyFor(zoneDistance(f), f.size).level} · ${f.size}×${f.size}`;
+    timerEl.textContent = fmt(save.timers[f.key] ?? 0);
   } else {
-    const [cx, cy] = centerZone();
-    const st = world.status(cx, cy);
-    zoneLabel.textContent = st === 'solved' ? `Zone ${cx}, ${cy} · solved` : 'Uncharted';
+    const cz = centerZone();
+    const st = world.status(cz);
+    if (st === 'solved') zoneLabel.textContent = `Lv ${zoneDistance(cz) + 1} · solved`;
+    else if (cz.tier > 0) {
+      const prog = world.sideProgress(cz);
+      const best = SIDES.map((s) => prog[s]).reduce((a, b) => (b[0] / b[1] > a[0] / a[1] ? b : a));
+      zoneLabel.textContent = `Locked · finish a side ${best[0]}/${best[1]}`;
+    } else zoneLabel.textContent = 'Uncharted';
     timerEl.textContent = '--:--';
   }
   solvedCount.textContent = String(save.stats.zonesSolved);
@@ -350,7 +422,7 @@ $('#btn-reset').addEventListener('click', () => {
   world = new World(save);
   zones = new ZoneCache(save.seed, () => (dirty = true));
   lastInteracted = null;
-  cam = { x: ZONE / 2, y: ZONE / 2, zoom: fitZoom() };
+  cam = camFor(ORIGIN);
   saveNow();
   closeModals();
   dirty = true;
@@ -367,8 +439,7 @@ function frame(now: number) {
     save.stats.totalPlayMs += dt;
     const f = focusZone();
     if (f && !anyModalOpen()) {
-      const k = zkey(...f);
-      save.timers[k] = (save.timers[k] ?? 0) + dt;
+      save.timers[f.key] = (save.timers[f.key] ?? 0) + dt;
     }
   }
   if (camAnim) {
@@ -378,9 +449,9 @@ function frame(now: number) {
     cam.x = from.x + (to.x - from.x) * e;
     cam.y = from.y + (to.y - from.y) * e;
     cam.zoom = from.zoom + (to.zoom - from.zoom) * e;
-    if (t >= 1) {
-      camAnim = null;
-      scheduleSave();
+    if (now - camAnim.t0 >= camAnim.dur + camAnim.hold) {
+      nextCamStep();
+      if (!camAnim) scheduleSave();
     }
     dirty = true;
   }
@@ -406,15 +477,15 @@ onResize();
 if (save.cam && isFinite(save.cam.x) && isFinite(save.cam.zoom)) {
   cam = { ...save.cam, zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, save.cam.zoom)) };
 } else {
-  const [x, y] = zoneCenter(0, 0);
-  cam = { x, y: y + 18 / fitZoom(), zoom: fitZoom() };
+  cam = camFor(ORIGIN);
 }
-for (const [x, y] of world.openZones()) zones.request(x, y);
+for (const z of world.openZones()) zones.request(z);
 if (!save.seenHelp) helpModal.hidden = false;
 updateHud();
 requestAnimationFrame(frame);
 
 // debug / test hook
+const zoneOf = (key: string) => zoneByKey(key) ?? ORIGIN;
 (window as any).__shikaku = {
   get save() {
     return save;
@@ -422,13 +493,18 @@ requestAnimationFrame(frame);
   get cam() {
     return { ...cam };
   },
-  solution: (zx: number, zy: number) => zones.getNow(zx, zy).solution,
+  zoneAt: (x: number, y: number) => zoneAtCell(x, y),
+  solution: (key: string) => zones.getNow(zoneOf(key)).solution,
   toScreen: (wx: number, wy: number) => {
     const b = canvas.getBoundingClientRect();
     const [x, y] = renderer.toScreen(cam, wx, wy);
     return [x + b.left, y + b.top];
   },
-  ready: (zx: number, zy: number) => !!zones.get(zx, zy),
-  status: (zx: number, zy: number) => world.status(zx, zy),
+  ready: (key: string) => !!zones.get(zoneOf(key)),
+  status: (key: string) => world.status(zoneOf(key)),
+  openZones: () => world.openZones().map((z) => z.key),
+  neighbours: (key: string) => edgeNeighbours(zoneOf(key)),
+  flyTo: (key: string) => flyTo(zoneOf(key)),
   idle: () => !camAnim,
+  tiers: TIERS,
 };

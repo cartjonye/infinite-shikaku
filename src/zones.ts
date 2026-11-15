@@ -1,13 +1,13 @@
 /** Caches generated puzzles; generates them in a Web Worker when available. */
 import { generateZone } from './generator';
+import type { Zone } from './layout';
 import type { Puzzle } from './types';
-import { zkey } from './world';
 
 export class ZoneCache {
   private cache = new Map<string, Puzzle>();
-  private pending = new Set<string>();
+  private pending = new Map<string, Zone>();
   private worker: Worker | null = null;
-  private queue: [number, number][] = [];
+  private queue: Zone[] = [];
 
   constructor(
     private seed: number,
@@ -16,71 +16,58 @@ export class ZoneCache {
     try {
       this.worker = new Worker(new URL('./gen.worker.ts', import.meta.url), { type: 'module' });
       this.worker.onmessage = (e) => {
-        const { zx, zy, seed, puzzle } = e.data;
-        if (seed !== this.seed) return;
-        this.store(zx, zy, puzzle);
+        const { key, seed, puzzle } = e.data;
+        if (seed !== this.seed || !this.pending.has(key)) return;
+        this.store(key, puzzle);
       };
       this.worker.onerror = () => {
         // fall back to main-thread generation
         this.worker = null;
-        const pend = [...this.pending];
+        const pend = [...this.pending.values()];
         this.pending.clear();
-        for (const k of pend) {
-          const [x, y] = k.split(',').map(Number);
-          this.request(x, y);
-        }
+        for (const z of pend) this.request(z);
       };
     } catch {
       this.worker = null;
     }
   }
 
-  private store(zx: number, zy: number, p: Puzzle) {
-    const k = zkey(zx, zy);
-    this.pending.delete(k);
-    this.cache.set(k, p);
-    this.onReady(k);
+  private store(key: string, p: Puzzle) {
+    this.pending.delete(key);
+    this.cache.set(key, p);
+    this.onReady(key);
   }
 
-  get(zx: number, zy: number): Puzzle | undefined {
-    return this.cache.get(zkey(zx, zy));
+  get(z: Zone): Puzzle | undefined {
+    return this.cache.get(z.key);
   }
 
   /** Synchronous generation (used when a puzzle is needed immediately). */
-  getNow(zx: number, zy: number): Puzzle {
-    const k = zkey(zx, zy);
-    let p = this.cache.get(k);
+  getNow(z: Zone): Puzzle {
+    let p = this.cache.get(z.key);
     if (!p) {
-      p = generateZone(this.seed, zx, zy);
-      this.cache.set(k, p);
-      this.pending.delete(k);
+      p = generateZone(this.seed, z);
+      this.cache.set(z.key, p);
+      this.pending.delete(z.key);
     }
     return p;
   }
 
-  request(zx: number, zy: number) {
-    const k = zkey(zx, zy);
-    if (this.cache.has(k) || this.pending.has(k)) return;
-    this.pending.add(k);
+  request(z: Zone) {
+    if (this.cache.has(z.key) || this.pending.has(z.key)) return;
+    this.pending.set(z.key, z);
     if (this.worker) {
-      this.worker.postMessage({ seed: this.seed, zx, zy });
+      this.worker.postMessage({ seed: this.seed, key: z.key, spec: { x0: z.x0, y0: z.y0, size: z.size } });
     } else {
-      this.queue.push([zx, zy]);
+      this.queue.push(z);
       if (this.queue.length === 1) setTimeout(() => this.drain(), 0);
     }
   }
 
   private drain() {
-    const job = this.queue.shift();
-    if (!job) return;
-    this.store(job[0], job[1], generateZone(this.seed, job[0], job[1]));
+    const z = this.queue.shift();
+    if (!z) return;
+    this.store(z.key, generateZone(this.seed, z));
     if (this.queue.length) setTimeout(() => this.drain(), 0);
-  }
-
-  reset(seed: number) {
-    this.seed = seed;
-    this.cache.clear();
-    this.pending.clear();
-    this.queue = [];
   }
 }

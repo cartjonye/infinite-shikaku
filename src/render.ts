@@ -1,8 +1,9 @@
 /** Canvas renderer for the infinite board. World units are cells. */
 import type { ZoneCache } from './zones';
-import { World, zkey } from './world';
-import { ZONE, rectContains, type Puzzle, type Rect } from './types';
+import { World } from './world';
+import { rectContains, type Puzzle, type Rect } from './types';
 import { hashInts } from './rng';
+import { SIDES, edgeNeighbours, sharedSpan, zonesInRect, type Side, type Zone } from './layout';
 
 export interface Camera {
   x: number; // world cell coordinate at screen centre
@@ -11,8 +12,7 @@ export interface Camera {
 }
 
 export interface Preview {
-  zx: number;
-  zy: number;
+  zone: Zone;
   rect: Rect;
 }
 
@@ -70,36 +70,31 @@ export class Renderer {
     return [(sx - this.w / 2) / cam.zoom + cam.x, (sy - this.h / 2) / cam.zoom + cam.y];
   }
 
-  /** 0..1 progress of the seam between two solved zones disappearing. */
-  private seam(world: World, ax: number, ay: number, bx: number, by: number, now: number): number {
-    const ka = zkey(ax, ay);
-    const kb = zkey(bx, by);
-    if (!world.solved.has(ka) || !world.solved.has(kb)) return 0;
-    const ta = world.solvedAt.get(ka) ?? -Infinity;
-    const tb = world.solvedAt.get(kb) ?? -Infinity;
-    const t = Math.max(ta, tb);
+  /** 0..1 progress of a side's seam disappearing (all zones on both sides solved). */
+  private seam(world: World, z: Zone, side: Side, now: number): number {
+    if (!world.isSolved(z)) return 0;
+    const nb = edgeNeighbours(z)[side];
+    let t = world.solvedAt.get(z.key) ?? -Infinity;
+    for (const n of nb) {
+      if (!world.isSolved(n)) return 0;
+      t = Math.max(t, world.solvedAt.get(n.key) ?? -Infinity);
+    }
     return Math.min(1, Math.max(0, (now - t) / FADE_MS));
   }
 
   /** Screen box for a zone-local rect, with zone-edge insets applied. */
-  private box(
-    cam: Camera,
-    zx: number,
-    zy: number,
-    q: Rect,
-    inset: { l: number; r: number; t: number; b: number },
-  ) {
+  private box(cam: Camera, z: Zone, q: Rect, inset: { l: number; r: number; t: number; b: number }) {
     const s = cam.zoom;
     const g = s * 0.07;
-    const [x0, y0] = this.toScreen(cam, zx * ZONE + q.c, zy * ZONE + q.r);
+    const [x0, y0] = this.toScreen(cam, z.x0 + q.c, z.y0 + q.r);
     let x = x0 + g / 2;
     let y = y0 + g / 2;
     let w = q.w * s - g;
     let h = q.h * s - g;
     if (q.c === 0) { x += inset.l; w -= inset.l; }
     if (q.r === 0) { y += inset.t; h -= inset.t; }
-    if (q.c + q.w === ZONE) w -= inset.r;
-    if (q.r + q.h === ZONE) h -= inset.b;
+    if (q.c + q.w === z.size) w -= inset.r;
+    if (q.r + q.h === z.size) h -= inset.b;
     return { x, y, w, h };
   }
 
@@ -115,11 +110,11 @@ export class Renderer {
     c.closePath();
   }
 
-  colorFor(zx: number, zy: number, clueIdx: number) {
-    return PALETTE[hashInts(zx, zy, clueIdx) % PALETTE.length];
+  colorFor(z: Zone, clueIdx: number) {
+    return PALETTE[hashInts(z.x0, z.y0, z.size, clueIdx) % PALETTE.length];
   }
 
-  draw(cam: Camera, world: World, zones: ZoneCache, preview: Preview | null, focus: [number, number] | null) {
+  draw(cam: Camera, world: World, zones: ZoneCache, preview: Preview | null, focus: Zone | null) {
     const c = this.ctx;
     const now = performance.now();
     let animating = false;
@@ -130,128 +125,116 @@ export class Renderer {
     const s = cam.zoom;
     const [wx0, wy0] = this.toWorld(cam, 0, 0);
     const [wx1, wy1] = this.toWorld(cam, this.w, this.h);
-    const zx0 = Math.floor(wx0 / ZONE);
-    const zx1 = Math.floor(wx1 / ZONE);
-    const zy0 = Math.floor(wy0 / ZONE);
-    const zy1 = Math.floor(wy1 / ZONE);
     const zoneGap = s * 0.22;
     const rad = s * 0.16;
 
-    for (let zy = zy0; zy <= zy1; zy++) {
-      for (let zx = zx0; zx <= zx1; zx++) {
-        const st = world.status(zx, zy);
-        const k = zkey(zx, zy);
-        const sides = {
-          l: this.seam(world, zx, zy, zx - 1, zy, now),
-          r: this.seam(world, zx, zy, zx + 1, zy, now),
-          t: this.seam(world, zx, zy, zx, zy - 1, now),
-          b: this.seam(world, zx, zy, zx, zy + 1, now),
-        };
-        for (const v of Object.values(sides)) if (v > 0 && v < 1) animating = true;
-        const inset = {
-          l: (zoneGap / 2) * (1 - sides.l),
-          r: (zoneGap / 2) * (1 - sides.r),
-          t: (zoneGap / 2) * (1 - sides.t),
-          b: (zoneGap / 2) * (1 - sides.b),
-        };
-        const whole = this.box(cam, zx, zy, { r: 0, c: 0, w: ZONE, h: ZONE }, inset);
+    for (const z of zonesInRect(wx0, wy0, wx1, wy1)) {
+      const st = world.status(z);
+      const k = z.key;
+      const fade = {} as Record<Side, number>;
+      for (const side of SIDES) {
+        fade[side] = this.seam(world, z, side, now);
+        if (fade[side] > 0 && fade[side] < 1) animating = true;
+      }
+      const inset = {
+        l: (zoneGap / 2) * (1 - fade.l),
+        r: (zoneGap / 2) * (1 - fade.r),
+        t: (zoneGap / 2) * (1 - fade.t),
+        b: (zoneGap / 2) * (1 - fade.b),
+      };
+      const whole = this.box(cam, z, { r: 0, c: 0, w: z.size, h: z.size }, inset);
 
-        if (st === 'locked') {
-          const near =
-            world.status(zx + 1, zy) === 'open' ||
-            world.status(zx - 1, zy) === 'open' ||
-            world.status(zx, zy + 1) === 'open' ||
-            world.status(zx, zy - 1) === 'open';
-          c.fillStyle = near ? this.colors.fogNear : this.colors.fog;
-          this.rr(whole.x, whole.y, whole.w, whole.h, rad * 1.5);
-          c.fill();
-          if (s >= 14) {
-            c.fillStyle = 'rgba(255,255,255,0.035)';
-            for (let r = 0; r < ZONE; r++)
-              for (let cc = 0; cc < ZONE; cc++) {
-                const [px, py] = this.toScreen(cam, zx * ZONE + cc + 0.5, zy * ZONE + r + 0.5);
-                c.beginPath();
-                c.arc(px, py, s * 0.06, 0, Math.PI * 2);
-                c.fill();
-              }
-          }
-          if (near && s >= 10) this.lock(whole.x + whole.w / 2, whole.y + whole.h / 2, s * 0.9);
-          continue;
-        }
-
-        const p = st === 'solved' ? zones.getNow(zx, zy) : zones.get(zx, zy);
-        if (!p) {
-          zones.request(zx, zy);
-          c.fillStyle = this.colors.fogNear;
-          this.rr(whole.x, whole.y, whole.w, whole.h, rad * 1.5);
-          c.fill();
-          animating = true;
-          continue;
-        }
-
-        const isFocus = focus && focus[0] === zx && focus[1] === zy && st === 'open';
-        if (st === 'open') {
-          // zone halo
-          c.strokeStyle = isFocus ? 'rgba(255,207,110,0.55)' : 'rgba(255,255,255,0.08)';
-          c.lineWidth = Math.max(1, s * 0.05);
-          this.rr(whole.x - s * 0.06, whole.y - s * 0.06, whole.w + s * 0.12, whole.h + s * 0.12, rad * 2);
-          c.stroke();
-          // empty cells
-          const clueSet = new Set(p.clues.map((q) => q.r * ZONE + q.c));
-          for (let r = 0; r < ZONE; r++)
-            for (let cc = 0; cc < ZONE; cc++) {
-              const b = this.box(cam, zx, zy, { r, c: cc, w: 1, h: 1 }, inset);
-              c.fillStyle = clueSet.has(r * ZONE + cc) ? this.colors.cellClue : this.colors.cell;
-              this.rr(b.x, b.y, b.w, b.h, rad);
+      if (st === 'locked') {
+        const nb = edgeNeighbours(z);
+        const near = SIDES.some((sd) => nb[sd].some((n) => world.status(n) !== 'locked'));
+        c.fillStyle = near ? this.colors.fogNear : this.colors.fog;
+        this.rr(whole.x, whole.y, whole.w, whole.h, rad * 1.5);
+        c.fill();
+        if (s >= 14) {
+          c.fillStyle = 'rgba(255,255,255,0.035)';
+          for (let r = 0; r < z.size; r++)
+            for (let cc = 0; cc < z.size; cc++) {
+              const [px, py] = this.toScreen(cam, z.x0 + cc + 0.5, z.y0 + r + 0.5);
+              c.beginPath();
+              c.arc(px, py, s * 0.06, 0, Math.PI * 2);
               c.fill();
             }
         }
+        if (near && s >= 6) {
+          const lockSize = Math.max(s * 0.9, Math.min(whole.w * 0.12, 48));
+          this.lock(whole.x + whole.w / 2, whole.y + whole.h / 2, lockSize);
+          if (z.tier > 0) this.sideProgress(cam, world, z, whole, lockSize);
+        }
+        continue;
+      }
 
-        // placed rectangles
-        const flash = st === 'solved' ? now - (world.solvedAt.get(k) ?? -1e9) : 1e9;
-        if (flash < 900) animating = true;
-        for (const q of world.rects(k)) {
-          const idx = World.matchClue(p, q);
-          const b = this.box(cam, zx, zy, q, inset);
-          c.fillStyle = idx >= 0 ? this.colorFor(zx, zy, idx) : this.colors.invalid;
-          this.rr(b.x, b.y, b.w, b.h, rad);
-          c.fill();
-          if (idx < 0) {
-            c.strokeStyle = 'rgba(255,255,255,0.45)';
-            c.setLineDash([s * 0.12, s * 0.1]);
-            c.lineWidth = Math.max(1, s * 0.04);
-            c.stroke();
-            c.setLineDash([]);
-          }
-          if (flash < 900) {
-            const a = 0.55 * (1 - flash / 900);
-            c.fillStyle = `rgba(255,255,255,${a})`;
+      const p = st === 'solved' ? zones.getNow(z) : zones.get(z);
+      if (!p) {
+        zones.request(z);
+        c.fillStyle = this.colors.fogNear;
+        this.rr(whole.x, whole.y, whole.w, whole.h, rad * 1.5);
+        c.fill();
+        animating = true;
+        continue;
+      }
+
+      const isFocus = focus === z && st === 'open';
+      if (st === 'open') {
+        c.strokeStyle = isFocus ? 'rgba(255,207,110,0.55)' : 'rgba(255,255,255,0.08)';
+        c.lineWidth = Math.max(1, s * 0.05);
+        this.rr(whole.x - s * 0.06, whole.y - s * 0.06, whole.w + s * 0.12, whole.h + s * 0.12, rad * 2);
+        c.stroke();
+        const clueSet = new Set(p.clues.map((q) => q.r * z.size + q.c));
+        for (let r = 0; r < z.size; r++)
+          for (let cc = 0; cc < z.size; cc++) {
+            const b = this.box(cam, z, { r, c: cc, w: 1, h: 1 }, inset);
+            c.fillStyle = clueSet.has(r * z.size + cc) ? this.colors.cellClue : this.colors.cell;
+            this.rr(b.x, b.y, b.w, b.h, rad);
             c.fill();
           }
-        }
+      }
 
-        // clues
-        if (s >= 9) {
-          c.textAlign = 'center';
-          c.textBaseline = 'middle';
-          for (const q of p.clues) {
-            const owned = world.rects(k).find((o) => rectContains(o, q.r, q.c));
-            const [px, py] = this.toScreen(cam, zx * ZONE + q.c + 0.5, zy * ZONE + q.r + 0.5);
-            const fs = s * (q.v >= 10 ? 0.46 : 0.55);
-            c.font = `700 ${fs}px ui-rounded, "SF Pro Rounded", system-ui, sans-serif`;
-            if (st === 'solved') c.fillStyle = 'rgba(27,29,38,0.55)';
-            else c.fillStyle = owned ? this.colors.ink : this.colors.text;
-            c.fillText(String(q.v), px, py + fs * 0.04);
-          }
+      const flash = st === 'solved' ? now - (world.solvedAt.get(k) ?? -1e9) : 1e9;
+      if (flash < 900) animating = true;
+      for (const q of world.shownRects(z, p)) {
+        const idx = World.matchClue(p, q);
+        const b = this.box(cam, z, q, inset);
+        c.fillStyle = idx >= 0 ? this.colorFor(z, idx) : this.colors.invalid;
+        this.rr(b.x, b.y, b.w, b.h, rad);
+        c.fill();
+        if (idx < 0) {
+          c.strokeStyle = 'rgba(255,255,255,0.45)';
+          c.setLineDash([s * 0.12, s * 0.1]);
+          c.lineWidth = Math.max(1, s * 0.04);
+          c.stroke();
+          c.setLineDash([]);
+        }
+        if (flash < 900) {
+          c.fillStyle = `rgba(255,255,255,${0.55 * (1 - flash / 900)})`;
+          c.fill();
+        }
+      }
+
+      if (s >= 9) {
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        for (const q of p.clues) {
+          const owned = world.shownRects(z, p).find((o) => rectContains(o, q.r, q.c));
+          const [px, py] = this.toScreen(cam, z.x0 + q.c + 0.5, z.y0 + q.r + 0.5);
+          const fs = s * (q.v >= 10 ? 0.46 : 0.55);
+          c.font = `700 ${fs}px ui-rounded, "SF Pro Rounded", system-ui, sans-serif`;
+          if (st === 'solved') c.fillStyle = 'rgba(27,29,38,0.55)';
+          else c.fillStyle = owned ? this.colors.ink : this.colors.text;
+          c.fillText(String(q.v), px, py + fs * 0.04);
         }
       }
     }
 
     // drag preview
     if (preview) {
-      const p = zones.get(preview.zx, preview.zy);
+      const p = zones.get(preview.zone);
       const zg = zoneGap / 2;
-      const b = this.box(cam, preview.zx, preview.zy, preview.rect, { l: zg, r: zg, t: zg, b: zg });
+      const b = this.box(cam, preview.zone, preview.rect, { l: zg, r: zg, t: zg, b: zg });
       const ok = p ? World.matchClue(p, preview.rect) >= 0 : false;
       c.fillStyle = ok ? 'rgba(142,224,168,0.45)' : 'rgba(255,255,255,0.22)';
       this.rr(b.x, b.y, b.w, b.h, rad);
@@ -275,6 +258,56 @@ export class Renderer {
       c.fillText(label, lx, ly);
     }
     return animating;
+  }
+
+  /** On a locked super zone: light the parts of each side whose neighbours are solved, and show "n/m". */
+  private sideProgress(
+    cam: Camera,
+    world: World,
+    z: Zone,
+    whole: { x: number; y: number; w: number; h: number },
+    lockSize: number,
+  ) {
+    const c = this.ctx;
+    const nb = edgeNeighbours(z);
+    const lw = Math.max(2, cam.zoom * 0.12);
+    let best: [number, number] = [0, 1];
+    for (const side of SIDES) {
+      const list = nb[side];
+      const solved = list.filter((n) => world.isSolved(n)).length;
+      if (solved === 0) continue;
+      if (solved / list.length > best[0] / best[1]) best = [solved, list.length];
+      for (const n of list) {
+        const [a, b] = sharedSpan(z, n, side);
+        const lit = world.isSolved(n);
+        c.strokeStyle = lit ? 'rgba(255,207,110,0.85)' : 'rgba(255,255,255,0.12)';
+        c.lineWidth = lw;
+        c.lineCap = 'round';
+        c.beginPath();
+        if (side === 'l' || side === 'r') {
+          const x = side === 'l' ? whole.x + lw : whole.x + whole.w - lw;
+          const [, y0] = this.toScreen(cam, 0, a);
+          const [, y1] = this.toScreen(cam, 0, b);
+          c.moveTo(x, Math.max(whole.y + lw * 2, y0 + lw * 2));
+          c.lineTo(x, Math.min(whole.y + whole.h - lw * 2, y1 - lw * 2));
+        } else {
+          const y = side === 't' ? whole.y + lw : whole.y + whole.h - lw;
+          const [x0] = this.toScreen(cam, a, 0);
+          const [x1] = this.toScreen(cam, b, 0);
+          c.moveTo(Math.max(whole.x + lw * 2, x0 + lw * 2), y);
+          c.lineTo(Math.min(whole.x + whole.w - lw * 2, x1 - lw * 2), y);
+        }
+        c.stroke();
+      }
+    }
+    if (best[0] > 0) {
+      const fs = Math.max(11, lockSize * 0.42);
+      c.font = `700 ${fs}px ui-rounded, system-ui, sans-serif`;
+      c.fillStyle = 'rgba(255,207,110,0.85)';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText(`${best[0]}/${best[1]}`, whole.x + whole.w / 2, whole.y + whole.h / 2 + lockSize * 0.75);
+    }
   }
 
   private lock(x: number, y: number, size: number) {
