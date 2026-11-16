@@ -328,7 +328,7 @@ function revealExpansion(target: Zone) {
   zones.request(target);
   const [x, y] = zoneCenter(target);
   playCam([{ to: { x, y: y + 18 / cam.zoom, zoom: cam.zoom }, dur: 1100, hold: 0 }]);
-  showBanner('The world expands', `${target.size}×${target.size} zones · ${layout.label(target).toLowerCase()}`);
+  showBanner('The world expands', `Bigger ${target.size}×${target.size} puzzles from here on`);
 }
 
 const bannerEl = $('#banner');
@@ -365,11 +365,11 @@ function smallerTarget(): Zone | null {
 }
 function doEasier() {
   const t = smallerTarget();
-  if (!t) return toast('No smaller zones open');
+  if (!t) return toast('No easier puzzles nearby yet');
   lastInteracted = t;
   zones.request(t);
   flyTo(t);
-  toast(`Jumping to a ${t.size}×${t.size} zone`);
+  toast(`Scale back to ${t.size}×${t.size}`);
 }
 
 function doContinue() {
@@ -420,9 +420,9 @@ function updateHud() {
     if (st === 'solved') zoneLabel.textContent = `${layout.label(cz)} · solved`;
     else if (best && (best.solved > 0 || (best.needsDiag && best.diagSolved)))
       zoneLabel.textContent = best.needsDiag
-        ? `Locked · side ${best.solved}/${best.total} · diagonal ${best.diagSolved ? 1 : 0}/1`
-        : `Locked · side ${best.solved}/${best.total}`;
-    else zoneLabel.textContent = `${layout.label(cz)} · uncharted`;
+        ? `To unlock: side ${best.solved}/${best.total} · corner ${best.diagSolved ? 1 : 0}/1`
+        : `To unlock: side ${best.solved}/${best.total}`;
+    else zoneLabel.textContent = `${layout.label(cz)} · unexplored`;
     timerEl.textContent = '--:--';
   }
   solvedCount.textContent = String(save.stats.zonesSolved);
@@ -461,8 +461,8 @@ function renderStats() {
     ['Average time', st.zonesSolved ? fmt(st.totalSolveMs / st.zonesSolved) : '–'],
     ['Last solve', st.lastMs === null ? '–' : fmt(st.lastMs)],
     save.mode === 'mosaic'
-      ? ['Farthest from centre', formatMetres(st.farthestM)]
-      : ['Deepest depth', String(st.deepest || '–')],
+      ? ['Farthest from home', formatMetres(st.farthestM)]
+      : ['Deepest reached', st.deepest ? `Depth ${st.deepest}` : '–'],
     ['Total play time', fmt(st.totalPlayMs)],
   ];
   $('#stats-grid').innerHTML = rows
@@ -498,11 +498,11 @@ $('#btn-fit').addEventListener('click', fitFocus);
 // ---------- sessions & menu ----------
 const HELP_MODE: Record<ModeId, string> = {
   classic:
-    'Zones grow ring by ring: 6×6, 8×8, 10×10, 12×12, 15×15, 16×16, 18×18, 20×20, then 24×24. Where the size steps up, a zone opens only when <b>every zone along one side</b> is solved <b>plus one diagonal zone</b> past that side\'s corner.',
+    'Puzzles grow as you travel, from 6×6 all the way to 24×24. To break into a bigger puzzle, clear <b>one whole side</b> of it plus <b>one corner piece</b> next to that side.',
   fixed:
-    'Every zone has the tile size you picked, forever. Puzzles get harder the deeper you go. Solve any neighbour to open a zone.',
+    'Every puzzle is the size you chose, and they get trickier the farther you roam. Clear any neighbour to open a new one.',
   mosaic:
-    'The world is a patchwork of random 66×66 blocks mixing every size from 6×6 to 24×24. A zone opens when <b>every zone along any one of its sides</b> is solved. The HUD shows how far you are from the centre, in metres.',
+    'Your world mixes puzzles of every size and is never the same twice. Clear <b>every puzzle along one side</b> of a locked zone to open it. The top of the screen shows how far you are from home.',
 };
 
 async function makeLayout(d: SaveData): Promise<WorldLayout> {
@@ -535,12 +535,12 @@ function setSession(L: WorldLayout, d: SaveData, persisted: boolean) {
 }
 
 async function startSession(d: SaveData) {
-  menuStatus('Loading…');
+  menuStatus('Building your world…');
   let L: WorldLayout;
   try {
     L = await makeLayout(d);
   } catch {
-    menuStatus('Could not load the Mosaic tiles. Check your connection and try again.');
+    menuStatus("Couldn't build your world. Check your connection and try again.");
     return;
   }
   menuStatus('');
@@ -566,7 +566,7 @@ function endSession() {
 }
 
 function newGame(m: ModeId, tileSize?: number) {
-  if (summarize(m) && !confirm(`Start a new ${MODE_NAMES[m]} game? Your current ${MODE_NAMES[m]} progress will be deleted.`)) return;
+  if (summarize(m) && !confirm(`Start a fresh ${MODE_NAMES[m]} world? Your current one will be lost.`)) return;
   clearSave(m);
   startSession(freshSave(m, tileSize));
 }
