@@ -195,3 +195,67 @@ describe('Mosaic', () => {
     expect(new World(L, save).status(z)).toBe('open');
   });
 });
+
+describe('World bookkeeping', () => {
+  it('reports unlock progress for every side, not just one', () => {
+    const L = createMosaicLayout(42, tiler);
+    // a zone with at least two sides that each have several neighbours
+    const z = L.zonesInRect(-60, -60, 120, 120).find(
+      (q) => q !== L.origin && SIDES.filter((s) => edgeNeighbours(L, q)[s].length >= 2).length >= 2,
+    )!;
+    const sides = SIDES.filter((s) => edgeNeighbours(L, z)[s].length >= 2).slice(0, 2);
+    const save = freshSave('mosaic');
+    save.solved = sides.map((s) => edgeNeighbours(L, z)[s][0].key);
+    const w = new World(L, save);
+    const states = w.sideStates(z);
+    expect(states.length).toBe(4);
+    for (const s of sides) expect(states.find((st) => st.side === s)!.solved).toBeGreaterThanOrEqual(1);
+    expect(w.bestSide(z)).not.toBeNull();
+  });
+
+  it('keeps anti-stuck zones open across a reload, even after other zones open', () => {
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const L = createMosaicLayout(seed, tiler);
+      const save = freshSave('mosaic');
+      const w = new World(L, save);
+      w.markSolved(L.origin);
+      const openKeys = w.openZones().map((z) => z.key).sort();
+      const again = new World(L, JSON.parse(JSON.stringify(save)));
+      expect(again.openZones().map((z) => z.key).sort()).toEqual(openKeys);
+    }
+  });
+
+  it('never re-locks a zone that was open', () => {
+    const L = createMosaicLayout(5, tiler);
+    const w = new World(L, freshSave('mosaic'));
+    const everOpen = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      for (const z of w.openZones()) everOpen.add(z.key);
+      const z = w.nearestOpen(L.centre[0], L.centre[1])!;
+      w.markSolved(z);
+      for (const k of everOpen) {
+        const q = zoneByKey(L, k)!;
+        expect(w.status(q)).not.toBe('locked');
+      }
+    }
+  });
+
+  it('keeps the player\'s own tiling if it ever differs from the generated solution', () => {
+    const L = createFixedLayout(6);
+    const save = freshSave('fixed', 6);
+    const w = new World(L, save);
+    const fake = { size: 6, clues: [], solution: [{ r: 0, c: 0, w: 6, h: 6 }], needsSearch: false };
+    save.rects[L.origin.key] = [
+      { r: 0, c: 0, w: 6, h: 3 },
+      { r: 3, c: 0, w: 6, h: 3 },
+    ];
+    w.markSolved(L.origin, fake);
+    expect(w.shownRects(L.origin, fake).length).toBe(2);
+    // and nothing is stored when it matches
+    const n = L.zoneAtCell(6, 0);
+    save.rects[n.key] = [{ r: 0, c: 0, w: 6, h: 6 }];
+    w.markSolved(n, fake);
+    expect(save.custom[n.key]).toBeUndefined();
+    expect(w.shownRects(n, fake)).toBe(fake.solution);
+  });
+});

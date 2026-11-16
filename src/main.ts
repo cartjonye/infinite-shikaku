@@ -13,7 +13,7 @@ import {
   type WorldLayout,
   type Zone,
 } from './layouts';
-import { Renderer, type Camera, type Preview } from './render';
+import { MIN_PLAY_ZOOM, Renderer, type Camera, type Preview } from './render';
 import { clearSave, freshSave, loadSave, sanitize, summarize, writeSave, type SaveData } from './storage';
 import type { Rect } from './types';
 import { World } from './world';
@@ -118,6 +118,25 @@ function focusZone(): Zone | null {
   return null;
 }
 
+/** The zone whose timer runs: the last zone the player acted in, once they have drawn in it. */
+function activeZone(): Zone | null {
+  if (!save.active) return null;
+  const z = zoneByKey(layout, save.active);
+  return z && world.status(z) === 'open' ? z : null;
+}
+function onScreen(z: Zone) {
+  const [x0, y0] = renderer.toScreen(cam, z.x0, z.y0);
+  const w = z.size * cam.zoom;
+  return x0 + w > 0 && y0 + w > 0 && x0 < renderer.w && y0 < renderer.h;
+}
+const playableZoom = () => cam.zoom >= MIN_PLAY_ZOOM;
+/** True while the active zone's clock is counting. */
+function timerRunning(): Zone | null {
+  if (!inGame || document.hidden || anyModalOpen() || !playableZoom()) return null;
+  const z = activeZone();
+  return z && z.key in save.timers && onScreen(z) ? z : null;
+}
+
 // ---------- input ----------
 interface Ptr {
   x: number;
@@ -127,9 +146,13 @@ const ptrs = new Map<number, Ptr>();
 type Mode =
   | { kind: 'none' }
   | { kind: 'pan'; moved: number }
-  | { kind: 'draw'; zone: Zone; r0: number; c0: number; sx: number; sy: number; moved: boolean }
+  | { kind: 'draw'; zone: Zone; r0: number; c0: number; sx: number; sy: number; moved: boolean; t0: number }
   | { kind: 'pinch'; d0: number; z0: number; wx: number; wy: number };
 let mode: Mode = { kind: 'none' };
+/** when the last pan, pinch, wheel or camera glide ended: taps right after it are ignored */
+let lastGestureAt = -1e9;
+const TAP_GUARD_MS = 300;
+const LONG_PRESS_MS = 500;
 
 function cellAt(sx: number, sy: number) {
   const [wx, wy] = renderer.toWorld(cam, sx, sy);
@@ -167,8 +190,9 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
   const h = cellAt(p.x, p.y);
-  if (world.status(h.zone) === 'open' && zones.get(h.zone)) {
-    mode = { kind: 'draw', zone: h.zone, r0: h.r, c0: h.c, sx: p.x, sy: p.y, moved: false };
+  // too far out to read the numbers: every drag pans
+  if (playableZoom() && world.status(h.zone) === 'open' && zones.get(h.zone)) {
+    mode = { kind: 'draw', zone: h.zone, r0: h.r, c0: h.c, sx: p.x, sy: p.y, moved: false, t0: performance.now() };
     lastInteracted = h.zone;
     preview = { zone: h.zone, rect: { r: h.r, c: h.c, w: 1, h: 1 } };
   } else {
@@ -217,9 +241,11 @@ canvas.addEventListener('pointermove', (e) => {
 function endPointer(e: PointerEvent, cancelled: boolean) {
   if (!ptrs.has(e.pointerId)) return;
   ptrs.delete(e.pointerId);
+  const now = performance.now();
   if (mode.kind === 'pinch') {
     if (ptrs.size === 1) mode = { kind: 'pan', moved: 99 };
     else if (ptrs.size === 0) mode = { kind: 'none' };
+    lastGestureAt = now;
     scheduleSave();
     return;
   }
@@ -227,23 +253,59 @@ function endPointer(e: PointerEvent, cancelled: boolean) {
     const z = mode.zone;
     const k = z.key;
     const p = zones.get(z)!;
+    const { r0, c0 } = mode;
+    const rect = preview.rect;
+    const isOneClue = (r: number, c: number) => p.clues.some((q) => q.r === r && q.c === c && q.v === 1);
+    let acted = false;
     if (!mode.moved) {
-      // tap: remove an existing rectangle, or place a 1-cell clue
-      if (!world.removeAt(k, mode.r0, mode.c0)) {
-        const { r0, c0 } = mode;
-        const clue = p.clues.find((q) => q.r === r0 && q.c === c0 && q.v === 1);
-        if (clue) world.place(k, { r: clue.r, c: clue.c, w: 1, h: 1 });
+      // a tap: ignored right after a gesture and when held too long (likely accidental)
+      const deliberate = now - lastGestureAt > TAP_GUARD_MS && now - mode.t0 < LONG_PRESS_MS;
+      if (deliberate) {
+        const gone = world.removeAt(k, r0, c0);
+        if (gone) {
+          acted = true;
+          toast('Rectangle removed', {
+            label: 'Undo',
+            run: () => {
+              if (world.status(z) !== 'open') return;
+              world.place(k, gone);
+              afterMove(z);
+            },
+          });
+        } else if (isOneClue(r0, c0)) {
+          world.place(k, { r: r0, c: c0, w: 1, h: 1 });
+          acted = true;
+        }
       }
-    } else {
-      world.place(k, preview.rect);
+    } else if (rect.w * rect.h > 1) {
+      world.place(k, rect);
+      acted = true;
+      // the clock starts with the first rectangle the player draws
+      if (!(k in save.timers)) save.timers[k] = 0;
+    } else if (isOneClue(rect.r, rect.c)) {
+      world.place(k, rect);
+      acted = true;
     }
-    if (world.isComplete(z, p)) onSolved(z);
+    // a drag that ends on a single ordinary cell places nothing
+    if (acted) afterMove(z);
+  }
+  if (mode.kind === 'pan') {
+    if (mode.moved > 8) lastGestureAt = now;
     scheduleSave();
   }
-  if (mode.kind === 'pan') scheduleSave();
   preview = null;
   mode = { kind: 'none' };
   dirty = true;
+}
+
+/** Bookkeeping after any change to a zone's rectangles. */
+function afterMove(z: Zone) {
+  save.active = z.key;
+  lastInteracted = z;
+  const p = zones.get(z);
+  if (p && world.isComplete(z, p)) onSolved(z);
+  dirty = true;
+  scheduleSave();
 }
 canvas.addEventListener('pointerup', (e) => endPointer(e, false));
 canvas.addEventListener('pointercancel', (e) => endPointer(e, true));
@@ -271,6 +333,7 @@ canvas.addEventListener(
       cam.y += e.deltaY / cam.zoom;
     }
     dirty = true;
+    lastGestureAt = performance.now();
     scheduleSave();
   },
   { passive: false },
@@ -289,6 +352,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === '-') zoomBy(1 / 1.35);
   if (e.key === 'f') fitFocus();
   if (e.key === 'e' && !easierBtn.hidden) doEasier();
+  if (e.key === 'h') goHome();
 });
 
 // ---------- solving ----------
@@ -296,21 +360,22 @@ function onSolved(z: Zone) {
   const k = z.key;
   const p = zones.get(z)!;
   const ms = save.timers[k] ?? 0;
-  const wasOpen = new Set(world.openZones().map((o) => o.key));
-  world.markSolved(z, p);
+  const newlyOpen = world.markSolved(z, p);
   const st = save.stats;
   st.zonesSolved++;
   st.totalSolveMs += ms;
-  st.lastMs = ms;
-  st.bestMs = st.bestMs === null ? ms : Math.min(st.bestMs, ms);
-  const newlyOpen = world.openZones().filter((o) => !wasOpen.has(o.key));
-  for (const o of newlyOpen) zones.request(o);
+  const bs = (st.bySize[z.size] ??= { solved: 0, totalMs: 0, bestMs: null });
+  const isBest = bs.solved > 0 && (bs.bestMs === null || ms < bs.bestMs);
+  bs.solved++;
+  bs.totalMs += ms;
+  bs.bestMs = bs.bestMs === null ? ms : Math.min(bs.bestMs, ms);
+  for (const o of newlyOpen) zones.request(o, true);
   const bigger = layout.expansionBanner ? newlyOpen.find((o) => !save.seenSizes.includes(o.size)) : undefined;
   if (bigger) {
     save.seenSizes.push(bigger.size);
     revealExpansion(bigger);
   } else {
-    toast(`Zone solved in ${fmt(ms)}${st.bestMs === ms && st.zonesSolved > 1 ? ' · new best' : ''}`);
+    toast(`Solved in ${fmt(ms)}${isBest ? ` · best ${z.size}×${z.size} yet` : ''}`);
   }
   saveNow();
   if (navigator.vibrate) {
@@ -325,7 +390,7 @@ function onSolved(z: Zone) {
 /** First time a bigger zone size unlocks: banner, then pan (never zoom) to it. */
 function revealExpansion(target: Zone) {
   lastInteracted = target;
-  zones.request(target);
+  zones.request(target, true);
   const [x, y] = zoneCenter(target);
   playCam([{ to: { x, y: y + 18 / cam.zoom, zoom: cam.zoom }, dur: 1100, hold: 0 }]);
   showBanner('The world expands', `Bigger ${target.size}×${target.size} puzzles from here on`);
@@ -346,28 +411,17 @@ function showBanner(title: string, sub: string) {
 /** Jump to the nearest open zone with a smaller grid than the one you're on. */
 function smallerTarget(): Zone | null {
   const from = focusZone() ?? lastInteracted ?? centerZone();
-  const open = world.openZones();
-  if (!open.length) return null;
   const [cx, cy] = zoneCenter(from);
-  const smaller = open.filter((o) => o.size < from.size);
-  const pool = smaller.length ? smaller : open.filter((o) => o.size === Math.min(...open.map((q) => q.size)) && o !== from);
-  let best: Zone | null = null;
-  let bestD = Infinity;
-  for (const o of pool) {
-    const [x, y] = zoneCenter(o);
-    const d = Math.hypot(x - cx, y - cy);
-    if (d < bestD) {
-      bestD = d;
-      best = o;
-    }
-  }
-  return best;
+  const smaller = world.nearestOpen(cx, cy, (o) => o.size < from.size);
+  if (smaller) return smaller;
+  const min = world.minOpenSize();
+  return world.nearestOpen(cx, cy, (o) => o.size === min && o !== from);
 }
 function doEasier() {
   const t = smallerTarget();
   if (!t) return toast('No easier puzzles nearby yet');
   lastInteracted = t;
-  zones.request(t);
+  zones.request(t, true);
   flyTo(t);
   toast(`Scale back to ${t.size}×${t.size}`);
 }
@@ -377,9 +431,13 @@ function doContinue() {
   const [cx, cy] = zoneCenter(from);
   const target = world.nearestOpen(cx, cy);
   if (!target) return;
-  zones.request(target);
+  zones.request(target, true);
   lastInteracted = target;
   flyTo(target);
+}
+
+function goHome() {
+  flyTo(layout.origin);
 }
 
 // ---------- HUD ----------
@@ -400,37 +458,68 @@ function fmt(ms: number) {
 }
 
 let toastTimer: number | undefined;
-function toast(msg: string) {
+let toastAction: (() => void) | null = null;
+function toast(msg: string, action?: { label: string; run: () => void }) {
   toastEl.textContent = msg;
+  toastAction = null;
+  if (action) {
+    const btn = document.createElement('button');
+    btn.className = 'toast-action';
+    btn.textContent = action.label;
+    toastEl.append(btn);
+    toastAction = action.run;
+  }
+  toastEl.classList.toggle('has-action', !!action);
   toastEl.classList.add('show');
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.remove('show'), 2600);
+  toastTimer = window.setTimeout(hideToast, action ? 4000 : 2600);
 }
+function hideToast() {
+  toastEl.classList.remove('show', 'has-action');
+  toastAction = null;
+}
+toastEl.addEventListener('click', (e) => {
+  if (!(e.target as HTMLElement).closest('.toast-action') || !toastAction) return;
+  const run = toastAction;
+  hideToast();
+  run();
+});
 
+const homeBtn = $<HTMLButtonElement>('#btn-home');
 function updateHud() {
   if (!inGame) return;
   const f = focusZone();
+  const running = timerRunning();
   if (f) {
-    zoneLabel.textContent = `${layout.label(f)} · ${f.size}×${f.size}`;
+    zoneLabel.textContent = playableZoom() ? `${layout.label(f)} · ${f.size}×${f.size}` : 'Zoom in to play';
     timerEl.textContent = fmt(save.timers[f.key] ?? 0);
+    timerEl.classList.toggle('idle', running !== f);
   } else {
     const cz = centerZone();
     const st = world.status(cz);
-    const best = st === 'locked' ? world.bestStepSide(cz) : null;
+    const best = st === 'locked' ? world.bestSide(cz) : null;
     if (st === 'solved') zoneLabel.textContent = `${layout.label(cz)} · solved`;
-    else if (best && (best.solved > 0 || (best.needsDiag && best.diagSolved)))
+    else if (best)
       zoneLabel.textContent = best.needsDiag
         ? `To unlock: side ${best.solved}/${best.total} · corner ${best.diagSolved ? 1 : 0}/1`
         : `To unlock: side ${best.solved}/${best.total}`;
     else zoneLabel.textContent = `${layout.label(cz)} · unexplored`;
     timerEl.textContent = '--:--';
+    timerEl.classList.add('idle');
   }
   solvedCount.textContent = String(save.stats.zonesSolved);
-  continueBtn.hidden = !!f || mode.kind !== 'none';
+  continueBtn.hidden = !!f || mode.kind !== 'none' || world.openCount === 0;
   const cur = f ?? centerZone();
-  const open = world.openZones();
-  const minOpen = open.length ? Math.min(...open.map((o) => o.size)) : Infinity;
-  easierBtn.hidden = !(cur.size > minOpen);
+  easierBtn.hidden = !(cur.size > world.minOpenSize());
+  // the Home button points towards the start while it is off screen
+  const home = layout.origin;
+  const away = !onScreen(home);
+  homeBtn.classList.toggle('away', away);
+  if (away) {
+    const [hx, hy] = zoneCenter(home);
+    const deg = (Math.atan2(hy - cam.y, hx - cam.x) * 180) / Math.PI;
+    homeBtn.style.setProperty('--dir', `${deg}deg`);
+  }
 }
 
 // ---------- modals: help, pause ----------
@@ -457,9 +546,7 @@ function renderStats() {
   const st = save.stats;
   const rows: [string, string][] = [
     ['Zones solved', String(st.zonesSolved)],
-    ['Best time', st.bestMs === null ? '–' : fmt(st.bestMs)],
-    ['Average time', st.zonesSolved ? fmt(st.totalSolveMs / st.zonesSolved) : '–'],
-    ['Last solve', st.lastMs === null ? '–' : fmt(st.lastMs)],
+    ['Time solving', fmt(st.totalSolveMs)],
     save.mode === 'mosaic'
       ? ['Farthest from home', formatMetres(st.farthestM)]
       : ['Deepest reached', st.deepest ? `Depth ${st.deepest}` : '–'],
@@ -468,6 +555,17 @@ function renderStats() {
   $('#stats-grid').innerHTML = rows
     .map(([k, v]) => `<div class="stat"><div class="stat-v">${v}</div><div class="stat-k">${k}</div></div>`)
     .join('');
+  const sizes = Object.keys(st.bySize)
+    .map(Number)
+    .sort((a, b) => a - b);
+  $('#stats-sizes').innerHTML = sizes.length
+    ? `<table><thead><tr><th>Grid</th><th>Solved</th><th>Best</th><th>Average</th></tr></thead><tbody>${sizes
+        .map((n) => {
+          const b = st.bySize[n];
+          return `<tr><td>${n}×${n}</td><td>${b.solved}</td><td>${b.bestMs === null ? '–' : fmt(b.bestMs)}</td><td>${fmt(b.totalMs / b.solved)}</td></tr>`;
+        })
+        .join('')}</tbody></table>`
+    : '<p class="muted">Solve a puzzle to see your times for each grid size.</p>';
   $('#pause-mode').textContent = modeTitle();
 }
 function openPause() {
@@ -494,6 +592,7 @@ easierBtn.addEventListener('click', doEasier);
 $('#btn-zoom-in').addEventListener('click', () => zoomBy(1.35));
 $('#btn-zoom-out').addEventListener('click', () => zoomBy(1 / 1.35));
 $('#btn-fit').addEventListener('click', fitFocus);
+homeBtn.addEventListener('click', goHome);
 
 // ---------- sessions & menu ----------
 const HELP_MODE: Record<ModeId, string> = {
@@ -530,7 +629,8 @@ function setSession(L: WorldLayout, d: SaveData, persisted: boolean) {
   } else {
     cam = camFor(L.origin);
   }
-  for (const z of world.openZones()) zones.request(z);
+  for (const z of world.openZones()) zones.request(z, true);
+  lastInteracted = activeZone();
   dirty = true;
 }
 
@@ -619,14 +719,20 @@ document.querySelectorAll<HTMLButtonElement>('.size-chip').forEach((b) =>
 // ---------- main loop ----------
 let lastTick = performance.now();
 let hudAcc = 0;
+let saveAcc = 0;
+const AUTOSAVE_MS = 5000;
 function frame(now: number) {
   const dt = Math.min(1000, now - lastTick);
   lastTick = now;
   if (inGame && !document.hidden && !anyModalOpen()) {
     save.stats.totalPlayMs += dt;
-    const f = focusZone();
-    if (f) {
-      save.timers[f.key] = (save.timers[f.key] ?? 0) + dt;
+    const z = timerRunning();
+    if (z) save.timers[z.key] += dt;
+    // autosave so a reload never loses more than a few seconds of clock
+    saveAcc += dt;
+    if (saveAcc > AUTOSAVE_MS) {
+      saveAcc = 0;
+      saveNow();
     }
   }
   if (camAnim) {
@@ -638,7 +744,10 @@ function frame(now: number) {
     cam.zoom = from.zoom + (to.zoom - from.zoom) * e;
     if (now - camAnim.t0 >= camAnim.dur + camAnim.hold) {
       nextCamStep();
-      if (!camAnim) scheduleSave();
+      if (!camAnim) {
+        lastGestureAt = now;
+        scheduleSave();
+      }
     }
     dirty = true;
   }
@@ -694,4 +803,42 @@ const zoneOf = (key: string) => zoneByKey(layout, key) ?? layout.origin;
   neighbours: (key: string) => edgeNeighbours(layout, zoneOf(key)),
   flyTo: (key: string) => flyTo(zoneOf(key)),
   idle: () => !camAnim,
+  timerRunning: () => timerRunning()?.key ?? null,
+  rects: (key: string) => world.rects(key).length,
+  /** test helper: mark the n open zones nearest the centre solved, without playing them */
+  simulate: (n: number) => {
+    const t0 = performance.now();
+    let worst = 0;
+    for (let i = 0; i < n; i++) {
+      const z = world.nearestOpen(layout.centre[0], layout.centre[1]);
+      if (!z) break;
+      const t = performance.now();
+      world.markSolved(z);
+      save.stats.zonesSolved++;
+      worst = Math.max(worst, performance.now() - t);
+    }
+    world.solvedAt.clear();
+    for (const z of world.openZones()) zones.request(z, true);
+    dirty = true;
+    saveNow();
+    return { ms: performance.now() - t0, worst, solved: save.solved.length, open: world.openCount };
+  },
+  /** test helper: time the next n drawn frames */
+  frameTimes: (n: number) =>
+    new Promise<number[]>((resolve) => {
+      const out: number[] = [];
+      const step = () => {
+        const t = performance.now();
+        dirty = renderer.draw(cam, world, zones, preview, focusZone());
+        out.push(performance.now() - t);
+        if (out.length >= n) resolve(out);
+        else requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }),
+  setCam: (x: number, y: number, zoom: number) => {
+    stopCam();
+    cam = { x, y, zoom };
+    dirty = true;
+  },
 };

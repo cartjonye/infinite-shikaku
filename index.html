@@ -32,7 +32,11 @@
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="3" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="15" y="15" width="6" height="6" rx="1.5" fill="currentColor"/><path d="M13 13l3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       <span>Easier</span>
     </button>
-    <div class="zoom-stack" role="group" aria-label="Zoom">
+    <div class="zoom-stack" role="group" aria-label="View">
+      <button id="btn-home" class="tool-btn" aria-label="Go home" title="Back to where you started (H)">
+        <svg class="home-icon" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M3.5 11.5 12 4l8.5 7.5M6 10v9.5h4.5V14h3v5.5H18V10" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg class="home-arrow" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
       <button id="btn-zoom-in" class="tool-btn" aria-label="Zoom in" title="Zoom in (+)">+</button>
       <button id="btn-zoom-out" class="tool-btn" aria-label="Zoom out" title="Zoom out (−)">−</button>
       <button id="btn-fit" class="tool-btn" aria-label="Fit zone" title="Fit zone (F)">
@@ -56,7 +60,8 @@
         <p>Drag across cells to draw a rectangle. Tap a rectangle to remove it. Tap a <b>1</b> to fill it.</p>
         <p>Solve a zone to unlock its neighbours, then hit <b>Continue</b> to glide to the next one. The world never ends, and it gets harder the further you travel.</p>
         <p id="help-mode"></p>
-        <p class="muted">Stuck? Tap <b>Easier</b> for a smaller puzzle nearby. Zoom with + / − or fit the view with ⤢.</p>
+        <p class="muted">Your clock starts with your first rectangle and pauses whenever you look away or zoom out. Stuck? Tap <b>Easier</b> for a smaller puzzle nearby.</p>
+        <p class="muted">The gold house marks where you started; the house button takes you back. Zoom with + / − or fit the view with ⤢.</p>
         <p class="muted">Drag on empty space to pan. Pinch or scroll to zoom. Pause (Esc) shows your stats. Progress saves automatically on this device, separately for each mode.</p>
         <button class="primary" data-close>Let's go</button>
       </div>
@@ -67,6 +72,7 @@
         <h2>Paused</h2>
         <div id="pause-mode" class="sheet-sub"></div>
         <div id="stats-grid" class="stats-grid"></div>
+        <div id="stats-sizes" class="stats-sizes"></div>
         <div class="stack">
           <button class="primary" data-close>Resume</button>
           <div class="row">

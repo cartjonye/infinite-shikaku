@@ -5,20 +5,34 @@
 import { zoneByKey, type ModeId, type WorldLayout } from './layouts';
 import type { Rect } from './types';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 const KEYS: Record<ModeId, string> = {
-  classic: 'infinite-shikaku:v3', // unchanged so existing Classic progress carries over
-  fixed: 'infinite-shikaku:fixed:v1',
-  mosaic: 'infinite-shikaku:mosaic:v1',
+  classic: 'infinite-shikaku:classic:v4',
+  fixed: 'infinite-shikaku:fixed:v2',
+  mosaic: 'infinite-shikaku:mosaic:v2',
 };
 const LAST_MODE_KEY = 'infinite-shikaku:last-mode';
-const LEGACY_KEYS = ['infinite-shikaku:v1', 'infinite-shikaku:v2'];
+// Saves made before the puzzle generator changed no longer match their worlds.
+const LEGACY_KEYS = [
+  'infinite-shikaku:v1',
+  'infinite-shikaku:v2',
+  'infinite-shikaku:v3',
+  'infinite-shikaku:fixed:v1',
+  'infinite-shikaku:mosaic:v1',
+];
+
+export interface SizeStats {
+  solved: number;
+  totalMs: number;
+  bestMs: number | null;
+}
 
 export interface Stats {
   zonesSolved: number;
+  /** sum of the solve timers of all solved zones */
   totalSolveMs: number;
-  bestMs: number | null;
-  lastMs: number | null;
+  /** per grid size (key = side length) */
+  bySize: Record<string, SizeStats>;
   /** deepest depth reached (Classic, Fixed) */
   deepest: number;
   /** farthest straight-line distance from the centre, in cells / metres (Mosaic) */
@@ -35,8 +49,14 @@ export interface SaveData {
   solved: string[];
   /** in-progress rectangles per zone key */
   rects: Record<string, Rect[]>;
-  /** elapsed ms per unsolved zone key */
+  /** elapsed ms per started, unsolved zone key (a key exists once the first rectangle is drawn) */
   timers: Record<string, number>;
+  /** the zone the player last acted in: its timer is the one that runs */
+  active: string | null;
+  /** zones opened by the anti-stuck rule; they stay open */
+  opened: string[];
+  /** player tilings that differ from the generated solution (should never happen) */
+  custom: Record<string, Rect[]>;
   cam: { x: number; y: number; zoom: number } | null;
   stats: Stats;
   seenHelp: boolean;
@@ -48,8 +68,7 @@ export interface SaveData {
 export const emptyStats = (): Stats => ({
   zonesSolved: 0,
   totalSolveMs: 0,
-  bestMs: null,
-  lastMs: null,
+  bySize: {},
   deepest: 0,
   farthestM: 0,
   totalPlayMs: 0,
@@ -64,6 +83,9 @@ export function freshSave(mode: ModeId, tileSize?: number): SaveData {
     solved: [],
     rects: {},
     timers: {},
+    active: null,
+    opened: [],
+    custom: {},
     cam: null,
     stats: emptyStats(),
     seenHelp: false,
@@ -117,7 +139,10 @@ export function sanitize(d: SaveData, L: WorldLayout): SaveData {
   d.solved = d.solved.filter(ok);
   const solved = new Set(d.solved);
   for (const k of Object.keys(d.rects)) if (!ok(k) || solved.has(k)) delete d.rects[k];
-  for (const k of Object.keys(d.timers)) if (!ok(k)) delete d.timers[k];
+  for (const k of Object.keys(d.timers)) if (!ok(k) || solved.has(k)) delete d.timers[k];
+  for (const k of Object.keys(d.custom)) if (!solved.has(k)) delete d.custom[k];
+  d.opened = d.opened.filter((k) => ok(k) && !solved.has(k));
+  if (d.active && (!ok(d.active) || solved.has(d.active))) d.active = null;
   return d;
 }
 

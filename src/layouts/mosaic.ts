@@ -21,9 +21,13 @@ export function formatMetres(m: number) {
 
 export function createMosaicLayout(worldSeed: number, tiler: Tiler): WorldLayout & { metres(z: Zone): number } {
   const pool = new ZonePool();
-  // per supertile: owner grid (cell -> zone)
-  const grids = new Map<string, Zone[]>();
-  const supertile = (I: number, J: number): Zone[] => {
+  // per supertile: owner grid (cell -> zone) and the list of its zones
+  interface Block {
+    grid: Zone[];
+    list: Zone[];
+  }
+  const grids = new Map<string, Block>();
+  const supertile = (I: number, J: number): Block => {
     const k = `${I},${J}`;
     let g = grids.get(k);
     if (g) {
@@ -31,10 +35,11 @@ export function createMosaicLayout(worldSeed: number, tiler: Tiler): WorldLayout
       grids.set(k, g); // LRU bump
       return g;
     }
-    g = new Array<Zone>(SUPER * SUPER);
+    g = { grid: new Array<Zone>(SUPER * SUPER), list: [] };
     for (const [x, y, s] of tiler.layout(supertileSeed(worldSeed, I, J))) {
       const z = pool.get(s, I * SUPER + x, J * SUPER + y);
-      for (let r = y; r < y + s; r++) for (let c = x; c < x + s; c++) g[r * SUPER + c] = z;
+      g.list.push(z);
+      for (let r = y; r < y + s; r++) for (let c = x; c < x + s; c++) g.grid[r * SUPER + c] = z;
     }
     grids.set(k, g);
     if (grids.size > CACHE_LIMIT) grids.delete(grids.keys().next().value!);
@@ -43,7 +48,7 @@ export function createMosaicLayout(worldSeed: number, tiler: Tiler): WorldLayout
   const zoneAtCell = (x: number, y: number): Zone => {
     const I = Math.floor(x / SUPER);
     const J = Math.floor(y / SUPER);
-    return supertile(I, J)[(y - J * SUPER) * SUPER + (x - I * SUPER)];
+    return supertile(I, J).grid[(y - J * SUPER) * SUPER + (x - I * SUPER)];
   };
 
   // the 6×6 zone nearest the middle of the first supertile
@@ -71,17 +76,14 @@ export function createMosaicLayout(worldSeed: number, tiler: Tiler): WorldLayout
     centre,
     zoneAtCell,
     zonesInRect(x0, y0, x1, y1) {
-      const seen = new Set<Zone>();
+      const out: Zone[] = [];
       for (let J = Math.floor(y0 / SUPER); J <= Math.floor(y1 / SUPER); J++)
-        for (let I = Math.floor(x0 / SUPER); I <= Math.floor(x1 / SUPER); I++) {
-          const g = supertile(I, J);
-          for (const z of g) {
-            if (seen.has(z)) continue;
+        for (let I = Math.floor(x0 / SUPER); I <= Math.floor(x1 / SUPER); I++)
+          for (const z of supertile(I, J).list) {
             if (z.x0 + z.size < x0 || z.x0 > x1 || z.y0 + z.size < y0 || z.y0 > y1) continue;
-            seen.add(z);
+            out.push(z);
           }
-        }
-      return [...seen];
+      return out;
     },
     depthFor: (z) => 1 + metres(z) / 12.5,
     label: (z) => formatMetres(metres(z)),

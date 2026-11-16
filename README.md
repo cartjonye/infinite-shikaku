@@ -15,7 +15,24 @@ Each mode has its own save, so the menu offers **Continue** or **New game** per 
   - A zone opens when every zone along any one of its sides is solved (no diagonal rule).
   - If that ever leaves nothing open, the frontier zone(s) closest to completing a side open, so a game can never get stuck.
 
-**Pause** (the ⏸ button or Esc) stops the timer and shows that mode's stats, plus How to play and Back to menu.
+**Pause** (the ⏸ button or Esc) stops the timer and shows that mode's stats, including a per-grid-size table of solved count, best and average time, plus How to play and Back to menu.
+
+## Timer and input rules
+
+- A zone's clock starts with the first rectangle the player drags in it. Looking at a zone or tapping never starts it.
+- The clock runs only for the zone the player last acted in, while that zone is on screen, the zoom is playable, the tab is visible and nothing is paused.
+- Below 9 px per cell (where clue numbers are hidden) the board is not playable: the clock pauses and every drag pans.
+- Accidental input is filtered: single-cell drags place nothing, taps right after a pan, pinch or glide are ignored, long presses are ignored, and removing a rectangle offers Undo.
+- The start zone has a gold outline and house badge; the Home button (H) glides back to it and points towards it while it is off screen.
+
+## Puzzle guarantees
+
+- Every puzzle has exactly one solution. The generator checks this with the solver, and the tests re-check it with an independent brute-force tiler. Solved zones are therefore not stored; they are redrawn from the seed.
+- Single-cell pieces are almost eliminated: they are a last resort in the partition, merged into neighbours where possible, and capped at `floor(size² / 150)` per zone.
+
+## Scale
+
+`tests/scale.test.ts` plays 5,000 zones in each mode: solve bookkeeping averages well under 0.1 ms, the save stays near 65 KB, and reloading takes about 40 ms. Solved zones are generated in a Web Worker and the puzzle cache is bounded, so large worlds reload without freezing.
 
 ## Classic: expanding world
 
@@ -46,7 +63,7 @@ Zones grow in concentric square rings around the start, where four 6×6 zones me
 - Drag on fog or solved areas to pan. Pinch or scroll to zoom.
 - **Continue** glides the camera to the nearest unlocked zone.
 - The game tracks the timer per zone, best, average and last solve times, farthest level and total play time.
-- Progress saves automatically to `localStorage` with one key per mode: `infinite-shikaku:v3` (Classic), `infinite-shikaku:fixed:v1` and `infinite-shikaku:mosaic:v1`.
+- Progress saves automatically to `localStorage` with one key per mode: `infinite-shikaku:classic:v4`, `infinite-shikaku:fixed:v2` and `infinite-shikaku:mosaic:v2`. It autosaves every 5 seconds, on every solve, and when the page is hidden.
 
 ## Develop
 

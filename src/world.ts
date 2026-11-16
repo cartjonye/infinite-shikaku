@@ -11,7 +11,7 @@ import {
   type Zone,
 } from './layouts';
 import type { SaveData } from './storage';
-import { rectArea, rectContains, rectsOverlap, type Puzzle, type Rect } from './types';
+import { rectArea, rectContains, rectEq, rectsOverlap, type Puzzle, type Rect } from './types';
 
 export type ZoneStatus = 'locked' | 'open' | 'solved';
 
@@ -27,14 +27,22 @@ export interface SideState {
   satisfied: boolean;
 }
 
+/** How close a side is to unlocking its zone (0..1). */
+export const sideScore = (s: SideState) =>
+  s.needsDiag ? (s.solved / s.total) * 0.75 + (s.diagSolved ? 0.25 : 0) : s.solved / s.total;
+
 export class World {
   solved: Set<string>;
   solvedAt = new Map<string, number>();
+  /** every unlocked, unsolved zone; kept up to date incrementally on each solve */
+  private open = new Map<string, Zone>();
+
   constructor(
     public layout: WorldLayout,
     public save: SaveData,
   ) {
     this.solved = new Set(save.solved);
+    this.rebuildOpen();
   }
 
   isSolved(z: Zone) {
@@ -43,7 +51,8 @@ export class World {
 
   sideState(z: Zone, side: Side): SideState {
     const nb = edgeNeighbours(this.layout, z)[side];
-    const solved = nb.filter((n) => this.solved.has(n.key)).length;
+    let solved = 0;
+    for (const n of nb) if (this.solved.has(n.key)) solved++;
     const total = nb.length;
     if (this.layout.unlockRule === 'full-side') {
       // Mosaic: every zone along the side, no diagonal
@@ -55,69 +64,98 @@ export class World {
     return { side, step, solved, total, diagSolved, needsDiag: true, satisfied: solved === total && diagSolved };
   }
 
-  /** The step side closest to being satisfied (for progress hints), or null. */
-  bestStepSide(z: Zone): SideState | null {
+  /** Unlock progress on all four sides. */
+  sideStates(z: Zone): SideState[] {
+    return SIDES.map((s) => this.sideState(z, s));
+  }
+
+  /** The side closest to unlocking the zone, if any side has progress. */
+  bestSide(z: Zone): SideState | null {
     let best: SideState | null = null;
-    const score = (s: SideState) => s.solved / s.total + (s.needsDiag && s.diagSolved ? 0.5 : 0);
-    for (const side of SIDES) {
-      const st = this.sideState(z, side);
-      if (!st.step) continue;
-      if (!best || score(st) > score(best)) best = st;
+    for (const st of this.sideStates(z)) {
+      if (st.solved === 0 && !(st.needsDiag && st.diagSolved)) continue;
+      if (!best || sideScore(st) > sideScore(best)) best = st;
     }
     return best;
   }
 
   /**
    * A zone opens through any satisfied side:
-   * - a side with no smaller neighbours: any neighbour on it solved;
-   * - a side bordering smaller zones: every zone on it solved, plus one diagonal zone.
+   * - Classic, Fixed: any neighbour on a side; on a side bordering smaller zones,
+   *   every zone on it plus one diagonal zone;
+   * - Mosaic: every zone along any one side.
    */
-  status(z: Zone): ZoneStatus {
-    if (this.solved.has(z.key)) return 'solved';
-    if (z === this.layout.origin) return 'open';
-    for (const side of SIDES) if (this.sideState(z, side).satisfied) return 'open';
-    if (this.fallback().has(z.key)) return 'open';
-    return 'locked';
+  private ruleOpens(z: Zone): boolean {
+    if (z === this.layout.origin) return true;
+    for (const side of SIDES) if (this.sideState(z, side).satisfied) return true;
+    return false;
   }
 
-  private fallbackCache: Set<string> | null = null;
+  status(z: Zone): ZoneStatus {
+    if (this.solved.has(z.key)) return 'solved';
+    return this.open.has(z.key) ? 'open' : 'locked';
+  }
+
+  /** Zones whose status could change when z is solved: everything within two neighbour steps. */
+  private around(z: Zone, visit: (n: Zone) => void) {
+    const nb = edgeNeighbours(this.layout, z);
+    for (const s of SIDES)
+      for (const n of nb[s]) {
+        visit(n);
+        const nn = edgeNeighbours(this.layout, n);
+        for (const t of SIDES) nn[t].forEach(visit);
+      }
+  }
+
+  private consider(z: Zone, added?: Zone[]) {
+    if (this.solved.has(z.key) || this.open.has(z.key)) return;
+    if (!this.ruleOpens(z)) return;
+    this.open.set(z.key, z);
+    added?.push(z);
+  }
+
+  private rebuildOpen() {
+    this.open.clear();
+    this.consider(this.layout.origin);
+    for (const k of this.save.opened) {
+      const z = zoneByKey(this.layout, k);
+      if (z && !this.solved.has(k)) this.open.set(k, z);
+    }
+    for (const k of this.solved) {
+      const z = zoneByKey(this.layout, k);
+      if (z) this.around(z, (n) => this.consider(n));
+    }
+    this.unstick();
+  }
 
   /**
-   * Anti-soft-lock: if the normal rules leave no zone open (e.g. in Mosaic, a small
-   * zone surrounded only by bigger zones), open the frontier zone(s) whose best side
-   * is closest to complete. Derived purely from the solved set, so nothing extra is saved.
+   * Anti-soft-lock: if the rules leave nothing open (e.g. in Mosaic, a small zone
+   * surrounded only by bigger ones), open the frontier zone(s) whose best side is
+   * closest to complete. They are recorded in the save and stay open.
    */
-  private fallback(): Set<string> {
-    if (this.fallbackCache) return this.fallbackCache;
-    this.fallbackCache = new Set(); // guard against re-entry while computing
+  private unstick(added?: Zone[]) {
+    if (this.open.size > 0 || this.solved.size === 0) return;
     const frontier = new Map<string, Zone>();
-    let anyOpen = false;
     for (const k of this.solved) {
       const z = zoneByKey(this.layout, k);
       if (!z) continue;
       const nb = edgeNeighbours(this.layout, z);
-      for (const s of SIDES)
-        for (const n of nb[s]) {
-          if (this.solved.has(n.key) || frontier.has(n.key)) continue;
-          frontier.set(n.key, n);
-          if (!anyOpen && (n === this.layout.origin || SIDES.some((sd) => this.sideState(n, sd).satisfied))) anyOpen = true;
-        }
+      for (const s of SIDES) for (const n of nb[s]) if (!this.solved.has(n.key)) frontier.set(n.key, n);
     }
-    const out = new Set<string>();
-    if (!anyOpen && frontier.size) {
-      let best = -1;
-      const scored = [...frontier.values()].map((n) => {
-        const f = Math.max(...SIDES.map((sd) => {
-          const st = this.sideState(n, sd);
-          return st.solved / st.total;
-        }));
-        best = Math.max(best, f);
-        return [n, f] as const;
-      });
-      for (const [n, f] of scored) if (f >= best - 1e-9) out.add(n.key);
+    let best = -1;
+    const scored: [Zone, number][] = [];
+    for (const n of frontier.values()) {
+      let f = 0;
+      for (const st of this.sideStates(n)) f = Math.max(f, sideScore(st));
+      best = Math.max(best, f);
+      scored.push([n, f]);
     }
-    this.fallbackCache = out;
-    return out;
+    for (const [n, f] of scored) {
+      if (f < best - 1e-9) continue;
+      this.open.set(n.key, n);
+      this.save.opened.push(n.key);
+      added?.push(n);
+    }
   }
 
   rects(k: string): Rect[] {
@@ -126,24 +164,31 @@ export class World {
 
   /** Rectangles to display: the solution for solved zones, the player's drawing otherwise. */
   shownRects(z: Zone, p: Puzzle): Rect[] {
-    return this.solved.has(z.key) ? p.solution : this.rects(z.key);
+    if (!this.solved.has(z.key)) return this.rects(z.key);
+    return this.save.custom[z.key] ?? p.solution;
   }
 
-  /** Place a rectangle, replacing any overlapping ones. */
-  place(k: string, q: Rect) {
-    const kept = this.rects(k).filter((o) => !rectsOverlap(o, q));
+  /** Place a rectangle, replacing any overlapping ones. Returns the rectangles it replaced. */
+  place(k: string, q: Rect): Rect[] {
+    const removed: Rect[] = [];
+    const kept = this.rects(k).filter((o) => {
+      if (!rectsOverlap(o, q)) return true;
+      removed.push(o);
+      return false;
+    });
     kept.push(q);
     this.save.rects[k] = kept;
+    return removed;
   }
 
-  removeAt(k: string, r: number, c: number): boolean {
+  removeAt(k: string, r: number, c: number): Rect | null {
     const list = this.rects(k);
     const i = list.findIndex((q) => rectContains(q, r, c));
-    if (i < 0) return false;
-    list.splice(i, 1);
+    if (i < 0) return null;
+    const [gone] = list.splice(i, 1);
     if (list.length) this.save.rects[k] = list;
     else delete this.save.rects[k];
-    return true;
+    return gone;
   }
 
   /** Index of the single clue a rect satisfies, or -1. */
@@ -170,55 +215,49 @@ export class World {
     return area === z.size * z.size && list.length === p.clues.length;
   }
 
-  markSolved(z: Zone, _p?: Puzzle) {
+  /** Mark a zone solved. Returns the zones this newly opened. */
+  markSolved(z: Zone, p?: Puzzle): Zone[] {
+    // Puzzles have exactly one solution, so the player's tiling equals the generated
+    // one. If that guarantee were ever broken, keep exactly what the player drew.
+    const mine = this.rects(z.key);
+    if (p && mine.length && !mine.every((q) => p.solution.some((o) => rectEq(o, q)))) {
+      this.save.custom[z.key] = mine.map((q) => ({ ...q }));
+    }
     this.solved.add(z.key);
-    this.openCache = null;
-    this.fallbackCache = null;
-    this.save.solved = [...this.solved];
+    this.save.solved.push(z.key);
+    this.open.delete(z.key);
     this.solvedAt.set(z.key, performance.now());
-    // solved zones render from the (deterministic) solution, so no need to store their rects
     delete this.save.rects[z.key];
     delete this.save.timers[z.key];
+    const i = this.save.opened.indexOf(z.key);
+    if (i >= 0) this.save.opened.splice(i, 1);
+    if (this.save.active === z.key) this.save.active = null;
     const st = this.save.stats;
     st.deepest = Math.max(st.deepest, Math.floor(this.layout.depthFor(z)));
     const [cx, cy] = zoneCenter(z);
     st.farthestM = Math.max(st.farthestM, Math.hypot(cx - this.layout.centre[0], cy - this.layout.centre[1]));
+
+    const added: Zone[] = [];
+    this.around(z, (n) => this.consider(n, added));
+    this.unstick(added);
+    return added;
   }
 
-  private openCache: Zone[] | null = null;
-
-  /** All open zones: unlocked but not yet solved (cached until the next solve). */
+  /** All open zones: unlocked but not yet solved. */
   openZones(): Zone[] {
-    if (this.openCache) return this.openCache;
-    const out: Zone[] = [];
-    const seen = new Set<string>();
-    const consider = (z: Zone) => {
-      if (seen.has(z.key)) return;
-      seen.add(z.key);
-      if (this.status(z) === 'open') out.push(z);
-    };
-    consider(this.layout.origin);
-    for (const k of this.solved) {
-      const z = zoneByKey(this.layout, k);
-      if (!z) continue;
-      const nb = edgeNeighbours(this.layout, z);
-      for (const s of SIDES)
-        for (const n of nb[s]) {
-          consider(n);
-          // a solved zone can complete a bigger zone's diagonal requirement one step away
-          const nn = edgeNeighbours(this.layout, n);
-          for (const t of SIDES) nn[t].forEach(consider);
-        }
-    }
-    this.openCache = out;
-    return out;
+    return [...this.open.values()];
+  }
+
+  get openCount() {
+    return this.open.size;
   }
 
   /** Nearest open zone to a world point; ties prefer zones closer to the origin. */
-  nearestOpen(wx: number, wy: number): Zone | null {
+  nearestOpen(wx: number, wy: number, filter?: (z: Zone) => boolean): Zone | null {
     let best: Zone | null = null;
     let bestD = Infinity;
-    for (const z of this.openZones()) {
+    for (const z of this.open.values()) {
+      if (filter && !filter(z)) continue;
       const [cx, cy] = zoneCenter(z);
       const d = Math.hypot(cx - wx, cy - wy) + this.layout.depthFor(z) * 0.001;
       if (d < bestD) {
@@ -227,5 +266,12 @@ export class World {
       }
     }
     return best;
+  }
+
+  /** Smallest grid size among open zones (Infinity when none). */
+  minOpenSize(): number {
+    let m = Infinity;
+    for (const z of this.open.values()) if (z.size < m) m = z.size;
+    return m;
   }
 }

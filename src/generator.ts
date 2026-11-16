@@ -51,7 +51,8 @@ function partition(rng: Rng, n: number, d: Difficulty): Rect[] {
         if (a > d.maxArea) break;
         // discourage very thin long strips a bit
         const thin = Math.max(w, h) / Math.min(w, h);
-        let wt = a <= 2 ? d.smallWeight : 1 + d.bigBias * (a / d.maxArea);
+        // single cells are a last resort; dominoes are merely discouraged
+        let wt = a === 1 ? 0.002 : a === 2 ? d.smallWeight : 1 + d.bigBias * (a / d.maxArea);
         if (thin > 4) wt *= 0.4;
         options.push({ r: r0, c: c0, w, h });
         weights.push(wt);
@@ -64,6 +65,47 @@ function partition(rng: Rng, n: number, d: Difficulty): Rect[] {
   }
   return rects;
 }
+
+/**
+ * Absorb single cells into a neighbour when the union is still a rectangle
+ * within the area cap. Returns the new list (order: reading order of top-left).
+ */
+function mergeSingles(rects: Rect[], maxArea: number): Rect[] {
+  const out = rects.map((q) => ({ ...q }));
+  for (let i = 0; i < out.length; i++) {
+    const q = out[i];
+    if (q.w !== 1 || q.h !== 1) continue;
+    let best = -1;
+    let bestArea = Infinity;
+    for (let j = 0; j < out.length; j++) {
+      if (j === i) continue;
+      const o = out[j];
+      if (o.w * o.h + 1 > maxArea) continue;
+      const vertical = o.w === 1 && o.c === q.c && (o.r + o.h === q.r || q.r + 1 === o.r);
+      const horizontal = o.h === 1 && o.r === q.r && (o.c + o.w === q.c || q.c + 1 === o.c);
+      // prefer the smallest neighbour so pieces stay balanced
+      if ((vertical || horizontal) && o.w * o.h < bestArea) {
+        best = j;
+        bestArea = o.w * o.h;
+      }
+    }
+    if (best < 0) continue;
+    const o = out[best];
+    if (o.w === 1 && o.c === q.c && (o.r + o.h === q.r || q.r + 1 === o.r)) {
+      o.r = Math.min(o.r, q.r);
+      o.h += 1;
+    } else {
+      o.c = Math.min(o.c, q.c);
+      o.w += 1;
+    }
+    out.splice(i, 1);
+    i = -1; // restart: merges can enable further merges
+  }
+  return out;
+}
+
+/** How many single cells a zone may contain before the partition is rejected. */
+export const singlesBudget = (size: number) => Math.floor((size * size) / 150);
 
 function placeClues(rng: Rng, rects: Rect[]): Clue[] {
   return rects.map((q) => ({
@@ -82,7 +124,7 @@ export interface ZoneSpec {
 }
 
 function attemptSeed(worldSeed: number, z: ZoneSpec, attempt: number) {
-  return hashInts(worldSeed, z.x0, z.y0, z.size * 7919 + attempt);
+  return hashInts(worldSeed, z.x0, z.y0, z.size * 7919 + attempt, 2);
 }
 
 export function generateZone(worldSeed: number, z: ZoneSpec): Puzzle {
@@ -93,8 +135,11 @@ export function generateZone(worldSeed: number, z: ZoneSpec): Puzzle {
     const d: Difficulty =
       attempt < 1500 ? base : { ...base, maxArea: Math.max(4, base.maxArea - Math.floor(attempt / 1500)) };
     const rng = mulberry32(attemptSeed(worldSeed, z, attempt));
-    const rects = partition(rng, n, d);
+    const rects = mergeSingles(partition(rng, n, d), d.maxArea);
     if (rects.length < 3) continue;
+    let singles = 0;
+    for (const q of rects) if (q.w === 1 && q.h === 1) singles++;
+    if (singles > singlesBudget(n) + Math.floor(attempt / 300)) continue;
     for (let place = 0; place < 6; place++) {
       const clues = placeClues(rng, rects);
       const res = solve(clues, n, n, 2);
