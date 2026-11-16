@@ -1,6 +1,6 @@
 /** Caches generated puzzles; generates them in a Web Worker when available. */
 import { generateZone } from './generator';
-import type { Zone } from './layout';
+import type { WorldLayout, Zone } from './layouts';
 import type { Puzzle } from './types';
 
 export class ZoneCache {
@@ -11,6 +11,7 @@ export class ZoneCache {
 
   constructor(
     private seed: number,
+    private layout: WorldLayout,
     private onReady: (key: string) => void,
   ) {
     try {
@@ -32,6 +33,18 @@ export class ZoneCache {
     }
   }
 
+  private spec(z: Zone) {
+    return { x0: z.x0, y0: z.y0, size: z.size, depth: this.layout.depthFor(z) };
+  }
+
+  /** Stop the worker (when leaving a game). */
+  dispose() {
+    this.worker?.terminate();
+    this.worker = null;
+    this.queue = [];
+    this.pending.clear();
+  }
+
   private store(key: string, p: Puzzle) {
     this.pending.delete(key);
     this.cache.set(key, p);
@@ -46,7 +59,7 @@ export class ZoneCache {
   getNow(z: Zone): Puzzle {
     let p = this.cache.get(z.key);
     if (!p) {
-      p = generateZone(this.seed, z);
+      p = generateZone(this.seed, this.spec(z));
       this.cache.set(z.key, p);
       this.pending.delete(z.key);
     }
@@ -57,7 +70,7 @@ export class ZoneCache {
     if (this.cache.has(z.key) || this.pending.has(z.key)) return;
     this.pending.set(z.key, z);
     if (this.worker) {
-      this.worker.postMessage({ seed: this.seed, key: z.key, spec: { x0: z.x0, y0: z.y0, size: z.size } });
+      this.worker.postMessage({ seed: this.seed, key: z.key, spec: this.spec(z) });
     } else {
       this.queue.push(z);
       if (this.queue.length === 1) setTimeout(() => this.drain(), 0);
@@ -67,7 +80,7 @@ export class ZoneCache {
   private drain() {
     const z = this.queue.shift();
     if (!z) return;
-    this.store(z.key, generateZone(this.seed, z));
+    this.store(z.key, generateZone(this.seed, this.spec(z)));
     if (this.queue.length) setTimeout(() => this.drain(), 0);
   }
 }

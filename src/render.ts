@@ -3,7 +3,7 @@ import type { ZoneCache } from './zones';
 import { World } from './world';
 import { rectContains, type Puzzle, type Rect } from './types';
 import { hashInts } from './rng';
-import { SIDES, diagonalZones, edgeNeighbours, sharedSpan, zonesInRect, type Side, type Zone } from './layout';
+import { SIDES, diagonalZones, edgeNeighbours, sharedSpan, type Side, type Zone } from './layouts';
 
 export interface Camera {
   x: number; // world cell coordinate at screen centre
@@ -73,7 +73,7 @@ export class Renderer {
   /** 0..1 progress of a side's seam disappearing (all zones on both sides solved). */
   private seam(world: World, z: Zone, side: Side, now: number): number {
     if (!world.isSolved(z)) return 0;
-    const nb = edgeNeighbours(z)[side];
+    const nb = edgeNeighbours(world.layout, z)[side];
     let t = world.solvedAt.get(z.key) ?? -Infinity;
     for (const n of nb) {
       if (!world.isSolved(n)) return 0;
@@ -128,7 +128,7 @@ export class Renderer {
     const zoneGap = s * 0.22;
     const rad = s * 0.16;
 
-    for (const z of zonesInRect(wx0, wy0, wx1, wy1)) {
+    for (const z of world.layout.zonesInRect(wx0, wy0, wx1, wy1)) {
       const st = world.status(z);
       const k = z.key;
       const fade = {} as Record<Side, number>;
@@ -145,7 +145,7 @@ export class Renderer {
       const whole = this.box(cam, z, { r: 0, c: 0, w: z.size, h: z.size }, inset);
 
       if (st === 'locked') {
-        const nb = edgeNeighbours(z);
+        const nb = edgeNeighbours(world.layout, z);
         const near = SIDES.some((sd) => nb[sd].some((n) => world.status(n) !== 'locked'));
         c.fillStyle = near ? this.colors.fogNear : this.colors.fog;
         this.rr(whole.x, whole.y, whole.w, whole.h, rad * 1.5);
@@ -277,7 +277,7 @@ export class Renderer {
     lockSize: number,
   ) {
     const st = world.bestStepSide(z);
-    if (!st || (st.solved === 0 && !st.diagSolved)) return;
+    if (!st || (st.solved === 0 && !(st.needsDiag && st.diagSolved))) return;
     const c = this.ctx;
     const side = st.side;
     const lw = Math.max(2, cam.zoom * 0.12);
@@ -287,7 +287,7 @@ export class Renderer {
     c.lineWidth = lw;
     const vertical = side === 'l' || side === 'r';
     const edge = side === 'l' ? whole.x + lw : side === 'r' ? whole.x + whole.w - lw : side === 't' ? whole.y + lw : whole.y + whole.h - lw;
-    for (const n of edgeNeighbours(z)[side]) {
+    for (const n of edgeNeighbours(world.layout, z)[side]) {
       const [a, b] = sharedSpan(z, n, side);
       c.strokeStyle = world.isSolved(n) ? gold : dim;
       c.beginPath();
@@ -305,11 +305,36 @@ export class Renderer {
       c.stroke();
     }
     // diagonal pips at both ends of the side
+    if (st.needsDiag) this.diagPips(world, z, side, vertical, edge, whole, lw, gold, dim);
+    const fs = Math.max(11, lockSize * 0.42);
+    c.font = `700 ${fs}px ui-rounded, system-ui, sans-serif`;
+    c.fillStyle = gold;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(
+      st.needsDiag ? `${st.solved}/${st.total} + ${st.diagSolved ? '◆' : '◇'}` : `${st.solved}/${st.total}`,
+      whole.x + whole.w / 2,
+      whole.y + whole.h / 2 + lockSize * 0.8,
+    );
+  }
+
+  private diagPips(
+    world: World,
+    z: Zone,
+    side: Side,
+    vertical: boolean,
+    edge: number,
+    whole: { x: number; y: number; w: number; h: number },
+    lw: number,
+    gold: string,
+    dim: string,
+  ) {
+    const c = this.ctx;
     const pip = Math.max(3, lw * 1.1);
     const ends: [number, number][] = vertical
       ? [[edge, whole.y + pip * 1.2], [edge, whole.y + whole.h - pip * 1.2]]
       : [[whole.x + pip * 1.2, edge], [whole.x + whole.w - pip * 1.2, edge]];
-    const diags = diagonalZones(z, side);
+    const diags = diagonalZones(world.layout, z, side);
     ends.forEach(([x, y], i) => {
       c.fillStyle = world.isSolved(diags[i]) ? gold : dim;
       c.beginPath();
@@ -320,16 +345,6 @@ export class Renderer {
       c.closePath();
       c.fill();
     });
-    const fs = Math.max(11, lockSize * 0.42);
-    c.font = `700 ${fs}px ui-rounded, system-ui, sans-serif`;
-    c.fillStyle = gold;
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillText(
-      `${st.solved}/${st.total} + ${st.diagSolved ? '◆' : '◇'}`,
-      whole.x + whole.w / 2,
-      whole.y + whole.h / 2 + lockSize * 0.8,
-    );
   }
 
   private lock(x: number, y: number, size: number) {

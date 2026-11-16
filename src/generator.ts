@@ -5,7 +5,6 @@
 import { hashInts, mulberry32, pickWeighted, randInt, type Rng } from './rng';
 import { solve } from './solver';
 import type { Clue, Puzzle, Rect } from './types';
-import { zoneDepth } from './layout';
 
 export interface Difficulty {
   depth: number;
@@ -78,6 +77,8 @@ export interface ZoneSpec {
   x0: number;
   y0: number;
   size: number;
+  /** difficulty driver from the world layout */
+  depth: number;
 }
 
 function attemptSeed(worldSeed: number, z: ZoneSpec, attempt: number) {
@@ -86,7 +87,7 @@ function attemptSeed(worldSeed: number, z: ZoneSpec, attempt: number) {
 
 export function generateZone(worldSeed: number, z: ZoneSpec): Puzzle {
   const n = z.size;
-  const base = difficultyFor(zoneDepth(z), n);
+  const base = difficultyFor(z.depth, n);
   for (let attempt = 0; attempt < 4000; attempt++) {
     // relax constraints gradually if we struggle
     const d: Difficulty =

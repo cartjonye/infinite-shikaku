@@ -1,16 +1,20 @@
 import './style.css';
 import {
-  ORIGIN,
-  TIERS,
+  FIXED_SIZES,
+  createClassicLayout,
+  createFixedLayout,
+  createMosaicLayout,
   edgeNeighbours,
-  zoneAtCell,
+  formatMetres,
+  loadTiler,
   zoneByKey,
   zoneCenter,
-  zoneDepth,
+  type ModeId,
+  type WorldLayout,
   type Zone,
-} from './layout';
+} from './layouts';
 import { Renderer, type Camera, type Preview } from './render';
-import { clearSave, freshSave, loadSave, writeSave, type SaveData } from './storage';
+import { clearSave, freshSave, loadSave, sanitize, summarize, writeSave, type SaveData } from './storage';
 import type { Rect } from './types';
 import { World } from './world';
 import { ZoneCache } from './zones';
@@ -20,10 +24,13 @@ const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as
 const canvas = $<HTMLCanvasElement>('#board');
 const renderer = new Renderer(canvas);
 
-let save: SaveData = loadSave();
-let world = new World(save);
+// The menu shows over an idle Classic backdrop that is never saved.
+let inGame = false;
+let layout: WorldLayout = createClassicLayout();
+let save: SaveData = { ...freshSave('classic'), seed: 20261116 };
+let world = new World(layout, save);
 let dirty = true;
-let zones = new ZoneCache(save.seed, () => (dirty = true));
+let zones = new ZoneCache(save.seed, layout, () => (dirty = true));
 
 const MIN_ZOOM = 3;
 const MAX_ZOOM = 140;
@@ -42,6 +49,7 @@ let lastInteracted: Zone | null = null;
 let saveTimer: number | undefined;
 function saveNow() {
   window.clearTimeout(saveTimer);
+  if (!inGame) return;
   save.cam = { ...cam };
   writeSave(save);
 }
@@ -95,7 +103,7 @@ function stopCam() {
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
 function centerZone(): Zone {
-  return zoneAtCell(Math.floor(cam.x), Math.floor(cam.y));
+  return layout.zoneAtCell(Math.floor(cam.x), Math.floor(cam.y));
 }
 
 /** The zone the player is working on: the open zone under the screen centre, else the last touched one if visible. */
@@ -127,7 +135,7 @@ function cellAt(sx: number, sy: number) {
   const [wx, wy] = renderer.toWorld(cam, sx, sy);
   const gx = Math.floor(wx);
   const gy = Math.floor(wy);
-  const zone = zoneAtCell(gx, gy);
+  const zone = layout.zoneAtCell(gx, gy);
   return { zone, r: gy - zone.y0, c: gx - zone.x0 };
 }
 
@@ -147,6 +155,7 @@ function startPinch() {
 }
 
 canvas.addEventListener('pointerdown', (e) => {
+  if (!inGame) return;
   canvas.setPointerCapture(e.pointerId);
   const p = localPos(e);
   ptrs.set(e.pointerId, p);
@@ -243,6 +252,7 @@ canvas.addEventListener(
   'wheel',
   (e) => {
     e.preventDefault();
+    if (!inGame) return;
     stopCam();
     const b = canvas.getBoundingClientRect();
     const sx = e.clientX - b.left;
@@ -267,7 +277,12 @@ canvas.addEventListener(
 );
 
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeModals();
+  if (!inGame) return;
+  if (e.key === 'Escape' || e.key === 'p') {
+    if (anyModalOpen()) closeModals();
+    else openPause();
+    return;
+  }
   if (anyModalOpen()) return;
   if ((e.key === 'Enter' || e.key === 'c') && !continueBtn.hidden) doContinue();
   if (e.key === '+' || e.key === '=') zoomBy(1.35);
@@ -290,7 +305,7 @@ function onSolved(z: Zone) {
   st.bestMs = st.bestMs === null ? ms : Math.min(st.bestMs, ms);
   const newlyOpen = world.openZones().filter((o) => !wasOpen.has(o.key));
   for (const o of newlyOpen) zones.request(o);
-  const bigger = newlyOpen.find((o) => !save.seenSizes.includes(o.size));
+  const bigger = layout.expansionBanner ? newlyOpen.find((o) => !save.seenSizes.includes(o.size)) : undefined;
   if (bigger) {
     save.seenSizes.push(bigger.size);
     revealExpansion(bigger);
@@ -313,7 +328,7 @@ function revealExpansion(target: Zone) {
   zones.request(target);
   const [x, y] = zoneCenter(target);
   playCam([{ to: { x, y: y + 18 / cam.zoom, zoom: cam.zoom }, dur: 1100, hold: 0 }]);
-  showBanner('The world expands', `${target.size}×${target.size} zones · depth ${zoneDepth(target)}`);
+  showBanner('The world expands', `${target.size}×${target.size} zones · ${layout.label(target).toLowerCase()}`);
 }
 
 const bannerEl = $('#banner');
@@ -393,40 +408,50 @@ function toast(msg: string) {
 }
 
 function updateHud() {
+  if (!inGame) return;
   const f = focusZone();
   if (f) {
-    zoneLabel.textContent = `Depth ${zoneDepth(f)} · ${f.size}×${f.size}`;
+    zoneLabel.textContent = `${layout.label(f)} · ${f.size}×${f.size}`;
     timerEl.textContent = fmt(save.timers[f.key] ?? 0);
   } else {
     const cz = centerZone();
     const st = world.status(cz);
     const best = st === 'locked' ? world.bestStepSide(cz) : null;
-    if (st === 'solved') zoneLabel.textContent = `Depth ${zoneDepth(cz)} · solved`;
-    else if (best && (best.solved > 0 || best.diagSolved))
-      zoneLabel.textContent = `Locked · side ${best.solved}/${best.total} · diagonal ${best.diagSolved ? 1 : 0}/1`;
-    else zoneLabel.textContent = `Depth ${zoneDepth(cz)} · uncharted`;
+    if (st === 'solved') zoneLabel.textContent = `${layout.label(cz)} · solved`;
+    else if (best && (best.solved > 0 || (best.needsDiag && best.diagSolved)))
+      zoneLabel.textContent = best.needsDiag
+        ? `Locked · side ${best.solved}/${best.total} · diagonal ${best.diagSolved ? 1 : 0}/1`
+        : `Locked · side ${best.solved}/${best.total}`;
+    else zoneLabel.textContent = `${layout.label(cz)} · uncharted`;
     timerEl.textContent = '--:--';
   }
   solvedCount.textContent = String(save.stats.zonesSolved);
   continueBtn.hidden = !!f || mode.kind !== 'none';
   const cur = f ?? centerZone();
-  const minOpen = Math.min(...world.openZones().map((o) => o.size));
+  const open = world.openZones();
+  const minOpen = open.length ? Math.min(...open.map((o) => o.size)) : Infinity;
   easierBtn.hidden = !(cur.size > minOpen);
 }
 
-// modals
-const statsModal = $('#stats-modal');
+// ---------- modals: help, pause ----------
+const pauseModal = $('#pause-modal');
 const helpModal = $('#help-modal');
+const sizeModal = $('#size-modal');
 function anyModalOpen() {
-  return !statsModal.hidden || !helpModal.hidden;
+  return !pauseModal.hidden || !helpModal.hidden || !sizeModal.hidden;
 }
 function closeModals() {
-  statsModal.hidden = true;
+  pauseModal.hidden = true;
   helpModal.hidden = true;
-  if (!save.seenHelp) {
+  sizeModal.hidden = true;
+  if (inGame && !save.seenHelp) {
     save.seenHelp = true;
     scheduleSave();
   }
+}
+const MODE_NAMES: Record<ModeId, string> = { classic: 'Classic', fixed: 'Fixed', mosaic: 'Mosaic' };
+function modeTitle() {
+  return save.mode === 'fixed' ? `Fixed · ${save.tileSize}×${save.tileSize}` : MODE_NAMES[save.mode];
 }
 function renderStats() {
   const st = save.stats;
@@ -435,18 +460,29 @@ function renderStats() {
     ['Best time', st.bestMs === null ? '–' : fmt(st.bestMs)],
     ['Average time', st.zonesSolved ? fmt(st.totalSolveMs / st.zonesSolved) : '–'],
     ['Last solve', st.lastMs === null ? '–' : fmt(st.lastMs)],
-    ['Deepest depth', String(st.deepest || '–')],
+    save.mode === 'mosaic'
+      ? ['Farthest from centre', formatMetres(st.farthestM)]
+      : ['Deepest depth', String(st.deepest || '–')],
     ['Total play time', fmt(st.totalPlayMs)],
   ];
   $('#stats-grid').innerHTML = rows
     .map(([k, v]) => `<div class="stat"><div class="stat-v">${v}</div><div class="stat-k">${k}</div></div>`)
     .join('');
+  $('#pause-mode').textContent = modeTitle();
 }
-$('#btn-stats').addEventListener('click', () => {
+function openPause() {
+  if (!inGame) return;
   renderStats();
-  statsModal.hidden = false;
-});
+  pauseModal.hidden = false;
+  saveNow();
+}
+$('#btn-pause').addEventListener('click', openPause);
 $('#btn-help').addEventListener('click', () => (helpModal.hidden = false));
+$('#btn-pause-help').addEventListener('click', () => {
+  pauseModal.hidden = true;
+  helpModal.hidden = false;
+});
+$('#btn-menu').addEventListener('click', endSession);
 document.querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', closeModals));
 document.querySelectorAll('.modal').forEach((m) =>
   m.addEventListener('click', (e) => {
@@ -458,20 +494,127 @@ easierBtn.addEventListener('click', doEasier);
 $('#btn-zoom-in').addEventListener('click', () => zoomBy(1.35));
 $('#btn-zoom-out').addEventListener('click', () => zoomBy(1 / 1.35));
 $('#btn-fit').addEventListener('click', fitFocus);
-$('#btn-reset').addEventListener('click', () => {
-  if (!confirm('Reset all progress and start a brand-new world?')) return;
-  clearSave();
-  save = freshSave();
-  save.seenHelp = true;
-  world = new World(save);
-  zones = new ZoneCache(save.seed, () => (dirty = true));
+
+// ---------- sessions & menu ----------
+const HELP_MODE: Record<ModeId, string> = {
+  classic:
+    'Zones grow ring by ring: 6×6, 8×8, 10×10, 12×12, 15×15, 16×16, 18×18, 20×20, then 24×24. Where the size steps up, a zone opens only when <b>every zone along one side</b> is solved <b>plus one diagonal zone</b> past that side\'s corner.',
+  fixed:
+    'Every zone has the tile size you picked, forever. Puzzles get harder the deeper you go. Solve any neighbour to open a zone.',
+  mosaic:
+    'The world is a patchwork of random 66×66 blocks mixing every size from 6×6 to 24×24. A zone opens when <b>every zone along any one of its sides</b> is solved. The HUD shows how far you are from the centre, in metres.',
+};
+
+async function makeLayout(d: SaveData): Promise<WorldLayout> {
+  if (d.mode === 'fixed') return createFixedLayout(d.tileSize ?? 8);
+  if (d.mode === 'mosaic') {
+    const tiler = await loadTiler(`${import.meta.env.BASE_URL}tilings_66x66.packed.txt`);
+    return createMosaicLayout(d.seed, tiler);
+  }
+  return createClassicLayout();
+}
+
+function setSession(L: WorldLayout, d: SaveData, persisted: boolean) {
+  zones.dispose();
+  stopCam();
+  ptrs.clear();
+  mode = { kind: 'none' };
+  preview = null;
+  layout = L;
+  save = persisted ? sanitize(d, L) : d;
+  world = new World(L, save);
+  zones = new ZoneCache(save.seed, L, () => (dirty = true));
   lastInteracted = null;
-  cam = camFor(ORIGIN);
+  if (save.cam && isFinite(save.cam.x) && isFinite(save.cam.zoom)) {
+    cam = { ...save.cam, zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, save.cam.zoom)) };
+  } else {
+    cam = camFor(L.origin);
+  }
+  for (const z of world.openZones()) zones.request(z);
+  dirty = true;
+}
+
+async function startSession(d: SaveData) {
+  menuStatus('Loading…');
+  let L: WorldLayout;
+  try {
+    L = await makeLayout(d);
+  } catch {
+    menuStatus('Could not load the Mosaic tiles. Check your connection and try again.');
+    return;
+  }
+  menuStatus('');
+  setSession(L, d, true);
+  inGame = true;
+  document.body.classList.add('in-game');
+  menuEl.hidden = true;
+  $('#help-mode').innerHTML = HELP_MODE[d.mode];
+  saveNow();
+  if (!save.seenHelp) helpModal.hidden = false;
+  updateHud();
+}
+
+function endSession() {
   saveNow();
   closeModals();
-  dirty = true;
-  toast('New world created');
-});
+  inGame = false;
+  document.body.classList.remove('in-game');
+  continueBtn.hidden = true;
+  easierBtn.hidden = true;
+  renderMenu();
+  menuEl.hidden = false;
+}
+
+function newGame(m: ModeId, tileSize?: number) {
+  if (summarize(m) && !confirm(`Start a new ${MODE_NAMES[m]} game? Your current ${MODE_NAMES[m]} progress will be deleted.`)) return;
+  clearSave(m);
+  startSession(freshSave(m, tileSize));
+}
+
+const menuEl = $('#menu');
+function menuStatus(msg: string) {
+  $('#menu-status').textContent = msg;
+}
+function ago(t: number) {
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  return `${Math.round(h / 24)} d ago`;
+}
+function renderMenu() {
+  for (const m of ['classic', 'fixed', 'mosaic'] as ModeId[]) {
+    const card = $(`.mode-card[data-mode="${m}"]`);
+    const sum = summarize(m);
+    const cont = card.querySelector<HTMLButtonElement>('[data-action="continue"]')!;
+    const line = card.querySelector<HTMLElement>('.mode-save')!;
+    cont.hidden = !sum;
+    if (sum) {
+      const where = m === 'mosaic' ? formatMetres(sum.farthestM) : `depth ${sum.deepest || 1}`;
+      const size = m === 'fixed' ? `${sum.tileSize}×${sum.tileSize} · ` : '';
+      line.textContent = `${size}${sum.zonesSolved} solved · ${where} · ${fmt(sum.totalPlayMs)} played · ${ago(sum.lastPlayed)}`;
+    } else line.textContent = 'No saved game';
+  }
+}
+document.querySelectorAll<HTMLButtonElement>('.mode-card button').forEach((btn) =>
+  btn.addEventListener('click', () => {
+    const m = btn.closest<HTMLElement>('.mode-card')!.dataset.mode as ModeId;
+    if (btn.dataset.action === 'continue') {
+      const d = loadSave(m);
+      if (d) startSession(d);
+    } else if (m === 'fixed') {
+      sizeModal.hidden = false;
+    } else newGame(m);
+  }),
+);
+$('#size-grid').innerHTML = FIXED_SIZES.map((n) => `<button class="size-chip" data-size="${n}">${n}×${n}</button>`).join('');
+document.querySelectorAll<HTMLButtonElement>('.size-chip').forEach((b) =>
+  b.addEventListener('click', () => {
+    sizeModal.hidden = true;
+    newGame('fixed', Number(b.dataset.size));
+  }),
+);
 
 // ---------- main loop ----------
 let lastTick = performance.now();
@@ -479,10 +622,10 @@ let hudAcc = 0;
 function frame(now: number) {
   const dt = Math.min(1000, now - lastTick);
   lastTick = now;
-  if (!document.hidden) {
+  if (inGame && !document.hidden && !anyModalOpen()) {
     save.stats.totalPlayMs += dt;
     const f = focusZone();
-    if (f && !anyModalOpen()) {
+    if (f) {
       save.timers[f.key] = (save.timers[f.key] ?? 0) + dt;
     }
   }
@@ -500,7 +643,7 @@ function frame(now: number) {
     dirty = true;
   }
   if (dirty) {
-    dirty = renderer.draw(cam, world, zones, preview, focusZone());
+    dirty = renderer.draw(cam, world, zones, preview, inGame ? focusZone() : null);
   }
   hudAcc += dt;
   if (hudAcc > 200) {
@@ -517,19 +660,14 @@ function onResize() {
 window.addEventListener('resize', onResize);
 onResize();
 
-// initial camera
-if (save.cam && isFinite(save.cam.x) && isFinite(save.cam.zoom)) {
-  cam = { ...save.cam, zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, save.cam.zoom)) };
-} else {
-  cam = camFor(ORIGIN);
-}
-for (const z of world.openZones()) zones.request(z);
-if (!save.seenHelp) helpModal.hidden = false;
-updateHud();
+// start on the menu over an idle backdrop
+setSession(layout, save, false);
+renderMenu();
+menuEl.hidden = false;
 requestAnimationFrame(frame);
 
 // debug / test hook
-const zoneOf = (key: string) => zoneByKey(key) ?? ORIGIN;
+const zoneOf = (key: string) => zoneByKey(layout, key) ?? layout.origin;
 (window as any).__shikaku = {
   get save() {
     return save;
@@ -537,7 +675,13 @@ const zoneOf = (key: string) => zoneByKey(key) ?? ORIGIN;
   get cam() {
     return { ...cam };
   },
-  zoneAt: (x: number, y: number) => zoneAtCell(x, y),
+  get inGame() {
+    return inGame;
+  },
+  get origin() {
+    return layout.origin.key;
+  },
+  zoneAt: (x: number, y: number) => layout.zoneAtCell(x, y),
   solution: (key: string) => zones.getNow(zoneOf(key)).solution,
   toScreen: (wx: number, wy: number) => {
     const b = canvas.getBoundingClientRect();
@@ -547,8 +691,7 @@ const zoneOf = (key: string) => zoneByKey(key) ?? ORIGIN;
   ready: (key: string) => !!zones.get(zoneOf(key)),
   status: (key: string) => world.status(zoneOf(key)),
   openZones: () => world.openZones().map((z) => z.key),
-  neighbours: (key: string) => edgeNeighbours(zoneOf(key)),
+  neighbours: (key: string) => edgeNeighbours(layout, zoneOf(key)),
   flyTo: (key: string) => flyTo(zoneOf(key)),
   idle: () => !camAnim,
-  tiers: TIERS,
 };
