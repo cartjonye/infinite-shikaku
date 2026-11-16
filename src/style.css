@@ -357,3 +357,5 @@ body:not(.in-game) #board { filter: blur(3px) brightness(0.55); }
 .stats-sizes td { text-align: right; padding: 7px 6px; border-top: 1px solid var(--line); font-weight: 700; }
 .stats-sizes th:first-child, .stats-sizes td:first-child { text-align: left; }
 .stats-sizes td:first-child { color: var(--accent); }
+
+.stats-grid .stat:last-child:nth-child(odd) { grid-column: span 2; }

@@ -544,8 +544,12 @@ function modeTitle() {
 }
 function renderStats() {
   const st = save.stats;
+  // total area of every solved zone, in square cells (1 cell = 1 m)
+  let area = 0;
+  for (const [n, b] of Object.entries(st.bySize)) area += Number(n) * Number(n) * b.solved;
   const rows: [string, string][] = [
     ['Zones solved', String(st.zonesSolved)],
+    ['Area cleared', `${area.toLocaleString('en-US')} m²`],
     ['Time solving', fmt(st.totalSolveMs)],
     save.mode === 'mosaic'
       ? ['Farthest from home', formatMetres(st.farthestM)]
