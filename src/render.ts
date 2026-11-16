@@ -263,7 +263,7 @@ export class Renderer {
       }
     }
 
-    this.homeBadge(cam, world.layout.origin);
+    this.homeBadge(cam, world, now);
 
     // drag preview
     if (preview) {
@@ -354,8 +354,9 @@ export class Renderer {
   }
 
   /** Marks the start zone: a house badge on its corner, or a pin when it is tiny on screen. */
-  private homeBadge(cam: Camera, origin: Zone) {
+  private homeBadge(cam: Camera, world: World, now: number) {
     const c = this.ctx;
+    const origin = world.layout.origin;
     const [x0, y0] = this.toScreen(cam, origin.x0, origin.y0);
     const w = origin.size * cam.zoom;
     if (x0 + w < -30 || y0 + w < -30 || x0 > this.w + 30 || y0 > this.h + 30) return;
@@ -378,11 +379,24 @@ export class Renderer {
       return;
     }
     // outline the home zone, with the badge straddling the middle of its top edge
-    c.strokeStyle = 'rgba(255,207,110,0.9)';
-    c.lineWidth = Math.max(2, cam.zoom * 0.07);
-    const g = cam.zoom * 0.11;
-    this.rr(x0 + g, y0 + g, w - 2 * g, w - 2 * g, cam.zoom * 0.2);
+    // The outline hugs the zone's tiles: it follows the same per-side inset the tiles
+    // use (which shrinks to nothing where the seam to a solved neighbour has faded)
+    // and runs down the middle of the gap around them.
+    const half = (cam.zoom * 0.22) / 2;
+    const inset = {
+      l: half * (1 - this.seam(world, origin, 'l', now)),
+      r: half * (1 - this.seam(world, origin, 'r', now)),
+      t: half * (1 - this.seam(world, origin, 't', now)),
+      b: half * (1 - this.seam(world, origin, 'b', now)),
+    };
+    const tiles = this.box(cam, origin, { r: 0, c: 0, w: origin.size, h: origin.size }, inset);
+    const lw = Math.max(1.5, cam.zoom * 0.05);
+    const pad = cam.zoom * 0.035; // half of the gap between neighbouring tiles
+    c.strokeStyle = 'rgba(255,207,110,0.95)';
+    c.lineWidth = lw;
+    this.rr(tiles.x - pad, tiles.y - pad, tiles.w + 2 * pad, tiles.h + 2 * pad, cam.zoom * 0.16 + pad);
     c.stroke();
+    const g = inset.t;
     const r = Math.max(10, Math.min(15, cam.zoom * 0.36));
     const cx = x0 + w / 2;
     const cy = y0 + g;
