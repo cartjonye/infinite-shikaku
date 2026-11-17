@@ -27,6 +27,7 @@ import {
   recordKey,
   savePrefs,
   submitRecord,
+  survivalBonusMs,
   writeSurvival,
   type RunState,
   type RunStyle,
@@ -685,7 +686,7 @@ const HELP_MODE: Record<ModeId, string> = {
 };
 const HELP_RUN: Record<RunStyle, string> = {
   timeattack: 'Clear as much Shikaku ground as you can before the clock hits zero. Every cell counts. ',
-  survival: 'Solve Shikaku to bank time. Bigger grids pay more. ',
+  survival: 'Solve Shikaku to bank time. Bigger grids pay more, and bonuses shrink as you go, so grab the big ones early. ',
 };
 
 async function makeLayout(d: SaveData): Promise<WorldLayout> {
@@ -880,6 +881,12 @@ function openRunPause() {
     ['Area cleared', area(run.area)],
     ['Zones solved', String(run.zones)],
     run.style === 'survival' ? ['Survived', fmt(run.elapsedMs)] : ['Time played', fmt(run.elapsedMs)],
+    ...(run.style === 'survival'
+      ? ([
+          ['Next 6×6 bonus', `+${survivalBonusMs(6, run.zones + 1) / 1000}s`],
+          ['Next 24×24 bonus', `+${survivalBonusMs(24, run.zones + 1) / 1000}s`],
+        ] as [string, string][])
+      : []),
   ];
   $('#run-pause-stats').innerHTML = statGrid(rows);
   $('#btn-run-quit').textContent = run.style === 'survival' ? 'Save and quit' : 'Quit';

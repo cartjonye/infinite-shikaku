@@ -11,7 +11,10 @@ export type RunStyle = 'timeattack' | 'survival';
 export const TA_MINUTES = [2, 5, 10];
 export const SURVIVAL_START_MS = 30_000;
 
-/** Seconds added per solved zone, scaled to the typical number of pieces in each grid size. */
+/**
+ * Relative value of each grid size, scaled to its typical number of pieces
+ * (6×6 = 10). The actual bonus is this times a multiplier that shrinks as the run goes on.
+ */
 export const SURVIVAL_BONUS_S: Record<number, number> = {
   6: 10,
   8: 15,
@@ -23,8 +26,23 @@ export const SURVIVAL_BONUS_S: Record<number, number> = {
   20: 61,
   24: 80,
 };
-export const survivalBonusMs = (size: number) =>
-  (SURVIVAL_BONUS_S[size] ?? Math.round(10 * (size / 6) ** 1.5)) * 1000;
+/** 6×6 bonus for the first zones of a run (3× the table), and the floor it shrinks to. */
+export const SURVIVAL_BASE_START_S = 30;
+export const SURVIVAL_BASE_FLOOR_S = 6;
+
+/**
+ * The 6×6 bonus for the n-th zone solved in a run (1-based): 30 s for zones 1 to 3,
+ * then 1 s less every 3 zones (29 s for zones 4 to 6, 28 s for 7 to 9, ...) down to 6 s.
+ * Because it shrinks per zone, not per area, big grids solved early are worth the most.
+ */
+export const survivalBase6 = (n: number) =>
+  Math.max(SURVIVAL_BASE_FLOOR_S, SURVIVAL_BASE_START_S - Math.floor((Math.max(1, n) - 1) / 3));
+
+/** Time added for solving the n-th zone of a run, of the given grid size. */
+export function survivalBonusMs(size: number, n: number): number {
+  const weight = SURVIVAL_BONUS_S[size] ?? Math.round(10 * (size / 6) ** 1.5);
+  return Math.round((survivalBase6(n) * weight) / 10) * 1000;
+}
 
 export interface RunState {
   style: RunStyle;
@@ -62,7 +80,7 @@ export function creditSolve(run: RunState, size: number): number {
   run.area += size * size;
   run.bySize[size] = (run.bySize[size] ?? 0) + 1;
   if (run.style !== 'survival') return 0;
-  const bonus = survivalBonusMs(size);
+  const bonus = survivalBonusMs(size, run.zones);
   run.clockMs += bonus;
   return bonus;
 }

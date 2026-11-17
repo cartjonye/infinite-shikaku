@@ -9,6 +9,7 @@ import {
   newRun,
   recordKey,
   submitRecord,
+  survivalBase6,
   survivalBonusMs,
   writeSurvival,
 } from '../src/runs';
@@ -26,10 +27,25 @@ const mem = new Map<string, string>();
 describe('runs', () => {
   beforeEach(() => mem.clear());
 
-  it('survival bonus follows the agreed table', () => {
+  it('survival bonus starts at 3x the table and shrinks 1 s (6x6) every 3 zones, down to 6 s', () => {
     expect(SURVIVAL_BONUS_S).toEqual({ 6: 10, 8: 15, 10: 22, 12: 28, 15: 40, 16: 44, 18: 52, 20: 61, 24: 80 });
-    expect(survivalBonusMs(6)).toBe(10_000);
-    expect(survivalBonusMs(24)).toBe(80_000);
+    // zones 1-3: 3x the table
+    for (const n of [1, 2, 3]) {
+      expect(survivalBase6(n)).toBe(30);
+      expect(survivalBonusMs(6, n)).toBe(30_000);
+      expect(survivalBonusMs(24, n)).toBe(240_000);
+    }
+    // from the 4th zone, 1 s less every 3 zones
+    expect(survivalBase6(4)).toBe(29);
+    expect(survivalBase6(6)).toBe(29);
+    expect(survivalBase6(7)).toBe(28);
+    expect(survivalBonusMs(12, 7)).toBe(Math.round((28 * 28) / 10) * 1000);
+    // floor of 6 s for 6x6 (0.6x the table) from zone 73 on
+    expect(survivalBase6(72)).toBe(7);
+    expect(survivalBase6(73)).toBe(6);
+    expect(survivalBase6(500)).toBe(6);
+    expect(survivalBonusMs(6, 500)).toBe(6_000);
+    expect(survivalBonusMs(24, 500)).toBe(48_000);
   });
 
   it('starts runs with the right clocks and credits solves', () => {
@@ -39,8 +55,8 @@ describe('runs', () => {
     expect(ta.area).toBe(64);
     const sv = newRun('survival', 'fixed', 10);
     expect(sv.clockMs).toBe(30_000);
-    expect(creditSolve(sv, 10)).toBe(22_000);
-    expect(sv.clockMs).toBe(52_000);
+    expect(creditSolve(sv, 10)).toBe(66_000);
+    expect(sv.clockMs).toBe(96_000);
     expect(sv.bySize).toEqual({ 10: 1 });
   });
 
