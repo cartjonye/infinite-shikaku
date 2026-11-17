@@ -16,6 +16,21 @@ import {
 import { MIN_PLAY_ZOOM, Renderer, type Camera, type Preview } from './render';
 import { clearSave, freshSave, loadSave, sanitize, summarize, writeSave, type SaveData } from './storage';
 import type { Rect } from './types';
+import {
+  TA_MINUTES,
+  clearSurvival,
+  creditSolve,
+  getRecord,
+  loadPrefs,
+  loadSurvival,
+  newRun,
+  recordKey,
+  savePrefs,
+  submitRecord,
+  writeSurvival,
+  type RunState,
+  type RunStyle,
+} from './runs';
 import { World } from './world';
 import { ZoneCache } from './zones';
 
@@ -26,6 +41,9 @@ const renderer = new Renderer(canvas);
 
 // The menu shows over an idle Classic backdrop that is never saved.
 let inGame = false;
+/** the Time Attack or Survival run in progress (null in Endless) */
+let run: RunState | null = null;
+let runPhase: 'countdown' | 'live' | 'over' | null = null;
 let layout: WorldLayout = createClassicLayout();
 let save: SaveData = { ...freshSave('classic'), seed: 20261116 };
 let world = new World(layout, save);
@@ -51,6 +69,11 @@ function saveNow() {
   window.clearTimeout(saveTimer);
   if (!inGame) return;
   save.cam = { ...cam };
+  if (run) {
+    // Time Attack is never saved; a Survival run keeps one slot per world until it ends
+    if (run.style === 'survival' && runPhase !== 'over') writeSurvival(save, run);
+    return;
+  }
   writeSave(save);
 }
 function scheduleSave() {
@@ -60,6 +83,8 @@ function scheduleSave() {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) saveNow();
   lastTick = performance.now();
+  // coming back to a live run: give the player a moment before the clock moves again
+  if (!document.hidden && run && runPhase === 'live' && !anyModalOpen()) startCountdown('Welcome back');
 });
 window.addEventListener('pagehide', saveNow);
 
@@ -132,6 +157,7 @@ function onScreen(z: Zone) {
 const playableZoom = () => cam.zoom >= MIN_PLAY_ZOOM;
 /** True while the active zone's clock is counting. */
 function timerRunning(): Zone | null {
+  if (run) return null; // runs use one shared clock instead
   if (!inGame || document.hidden || anyModalOpen() || !playableZoom()) return null;
   const z = activeZone();
   return z && z.key in save.timers && onScreen(z) ? z : null;
@@ -178,7 +204,7 @@ function startPinch() {
 }
 
 canvas.addEventListener('pointerdown', (e) => {
-  if (!inGame) return;
+  if (!inGame || (run && runPhase !== 'live')) return;
   canvas.setPointerCapture(e.pointerId);
   const p = localPos(e);
   ptrs.set(e.pointerId, p);
@@ -265,11 +291,13 @@ function endPointer(e: PointerEvent, cancelled: boolean) {
         if (gone) {
           acted = true;
           toast('Rectangle removed', {
-            label: 'Undo',
-            run: () => {
-              if (world.status(z) !== 'open') return;
-              world.place(k, gone);
-              afterMove(z);
+            action: {
+              label: 'Undo',
+              run: () => {
+                if (world.status(z) !== 'open') return;
+                world.place(k, gone);
+                afterMove(z);
+              },
             },
           });
         } else if (isOneClue(r0, c0)) {
@@ -340,7 +368,7 @@ canvas.addEventListener(
 );
 
 window.addEventListener('keydown', (e) => {
-  if (!inGame) return;
+  if (!inGame || runPhase === 'over' || runPhase === 'countdown') return;
   if (e.key === 'Escape' || e.key === 'p') {
     if (anyModalOpen()) closeModals();
     else openPause();
@@ -361,6 +389,7 @@ function onSolved(z: Zone) {
   const p = zones.get(z)!;
   const ms = save.timers[k] ?? 0;
   const newlyOpen = world.markSolved(z, p);
+  if (run) return onRunSolved(z, newlyOpen);
   const st = save.stats;
   st.zonesSolved++;
   st.totalSolveMs += ms;
@@ -375,7 +404,7 @@ function onSolved(z: Zone) {
     save.seenSizes.push(bigger.size);
     revealExpansion(bigger);
   } else {
-    toast(`Solved in ${fmt(ms)}${isBest ? ` · best ${z.size}×${z.size} yet` : ''}`);
+    toast(`Solved in ${fmt(ms)}`, isBest ? { pill: `Best ${z.size}×${z.size} yet` } : undefined);
   }
   saveNow();
   if (navigator.vibrate) {
@@ -393,7 +422,7 @@ function revealExpansion(target: Zone) {
   zones.request(target, true);
   const [x, y] = zoneCenter(target);
   playCam([{ to: { x, y: y + 18 / cam.zoom, zoom: cam.zoom }, dur: 1100, hold: 0 }]);
-  showBanner('The world expands', `Bigger ${target.size}×${target.size} puzzles from here on`);
+  showBanner('The world expands', `Bigger ${target.size}×${target.size} Shikaku from here on`);
 }
 
 const bannerEl = $('#banner');
@@ -419,7 +448,7 @@ function smallerTarget(): Zone | null {
 }
 function doEasier() {
   const t = smallerTarget();
-  if (!t) return toast('No easier puzzles nearby yet');
+  if (!t) return toast('No easier Shikaku nearby yet');
   lastInteracted = t;
   zones.request(t, true);
   flyTo(t);
@@ -459,9 +488,11 @@ function fmt(ms: number) {
 
 let toastTimer: number | undefined;
 let toastAction: (() => void) | null = null;
-function toast(msg: string, action?: { label: string; run: () => void }) {
+function toast(msg: string, extra?: { action?: { label: string; run: () => void }; pill?: string }) {
   toastEl.textContent = msg;
   toastAction = null;
+  if (extra?.pill) toastEl.insertAdjacentHTML('beforeend', pills([[extra.pill, 'gold']]));
+  const action = extra?.action;
   if (action) {
     const btn = document.createElement('button');
     btn.className = 'toast-action';
@@ -485,32 +516,68 @@ toastEl.addEventListener('click', (e) => {
   run();
 });
 
+/** Rounded labels used instead of dot separators. Items are text or [text, variant]. */
+const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+function pills(items: (string | [string, string])[]) {
+  return items
+    .map((i) => (typeof i === 'string' ? `<span class="pill">${esc(i)}</span>` : `<span class="pill ${i[1]}">${esc(i[0])}</span>`))
+    .join('');
+}
+function setHtml(el: HTMLElement, html: string) {
+  if (el.dataset.html !== html) {
+    el.innerHTML = html;
+    el.dataset.html = html;
+  }
+}
+const area = (n: number) => `${n.toLocaleString('en-US')} m²`;
+const zonesText = (n: number) => `${n} ${n === 1 ? 'zone' : 'zones'}`;
+/** Countdown clocks round up, so 0:00 only shows when time is truly out. */
+const clock = (ms: number) => fmt(Math.ceil(Math.max(0, ms) / 1000) * 1000);
+
 const homeBtn = $<HTMLButtonElement>('#btn-home');
+const runPillsEl = $('#run-pills');
 function updateHud() {
   if (!inGame) return;
   const f = focusZone();
   const running = timerRunning();
   if (f) {
-    zoneLabel.textContent = playableZoom() ? `${layout.label(f)} · ${f.size}×${f.size}` : 'Zoom in to play';
+    setHtml(
+      zoneLabel,
+      playableZoom() ? pills([layout.label(f), `${f.size}×${f.size}`]) : pills([['Zoom in to play', 'gold']]),
+    );
     timerEl.textContent = fmt(save.timers[f.key] ?? 0);
     timerEl.classList.toggle('idle', running !== f);
   } else {
     const cz = centerZone();
     const st = world.status(cz);
     const best = st === 'locked' ? world.bestSide(cz) : null;
-    if (st === 'solved') zoneLabel.textContent = `${layout.label(cz)} · solved`;
+    if (st === 'solved') setHtml(zoneLabel, pills([layout.label(cz), ['Solved', 'gold']]));
     else if (best)
-      zoneLabel.textContent = best.needsDiag
-        ? `To unlock: side ${best.solved}/${best.total} · corner ${best.diagSolved ? 1 : 0}/1`
-        : `To unlock: side ${best.solved}/${best.total}`;
-    else zoneLabel.textContent = `${layout.label(cz)} · unexplored`;
+      setHtml(
+        zoneLabel,
+        pills([
+          ['To unlock', 'gold'],
+          `Side ${best.solved}/${best.total}`,
+          ...(best.needsDiag ? [`Corner ${best.diagSolved ? 1 : 0}/1`] : []),
+        ]),
+      );
+    else setHtml(zoneLabel, pills([layout.label(cz), ['Unexplored', 'dim']]));
     timerEl.textContent = '--:--';
     timerEl.classList.add('idle');
   }
   solvedCount.textContent = String(save.stats.zonesSolved);
-  continueBtn.hidden = !!f || mode.kind !== 'none' || world.openCount === 0;
+  if (run) {
+    // one shared countdown for the whole run
+    timerEl.textContent = clock(run.clockMs);
+    timerEl.classList.remove('idle');
+    timerEl.classList.toggle('low', runPhase === 'live' && run.clockMs < 10_000);
+    setHtml(runPillsEl, pills([[area(run.area), 'gold'], zonesText(run.zones)]));
+    solvedCount.textContent = String(run.zones);
+  } else timerEl.classList.remove('low');
+  runPillsEl.hidden = !run;
+  continueBtn.hidden = !!f || mode.kind !== 'none' || world.openCount === 0 || runPhase === 'over';
   const cur = f ?? centerZone();
-  easierBtn.hidden = !(cur.size > world.minOpenSize());
+  easierBtn.hidden = !(cur.size > world.minOpenSize()) || runPhase === 'over';
   // the Home button points towards the start while it is off screen
   const home = layout.origin;
   const away = !onScreen(home);
@@ -526,39 +593,44 @@ function updateHud() {
 const pauseModal = $('#pause-modal');
 const helpModal = $('#help-modal');
 const sizeModal = $('#size-modal');
+const runPauseModal = $('#run-pause-modal');
+const resultsModal = $('#results-modal');
 function anyModalOpen() {
-  return !pauseModal.hidden || !helpModal.hidden || !sizeModal.hidden;
+  return !pauseModal.hidden || !helpModal.hidden || !sizeModal.hidden || !runPauseModal.hidden || !resultsModal.hidden;
 }
 function closeModals() {
+  const wasOpen = !pauseModal.hidden || !helpModal.hidden || !runPauseModal.hidden;
   pauseModal.hidden = true;
   helpModal.hidden = true;
   sizeModal.hidden = true;
+  runPauseModal.hidden = true;
   if (inGame && !save.seenHelp) {
     save.seenHelp = true;
     scheduleSave();
   }
+  // back to a live run: count the player in again
+  if (wasOpen && run && runPhase === 'live') startCountdown('Get ready');
 }
 const MODE_NAMES: Record<ModeId, string> = { classic: 'Classic', fixed: 'Fixed', mosaic: 'Mosaic' };
-function modeTitle() {
-  return save.mode === 'fixed' ? `Fixed · ${save.tileSize}×${save.tileSize}` : MODE_NAMES[save.mode];
+const STYLE_NAMES: Record<RunStyle, string> = { timeattack: 'Time Attack', survival: 'Survival' };
+function worldPills(world: ModeId, tileSize?: number): (string | [string, string])[] {
+  return world === 'fixed' ? [['Fixed', 'gold'], `${tileSize}×${tileSize}`] : [[MODE_NAMES[world], 'gold']];
 }
 function renderStats() {
   const st = save.stats;
   // total area of every solved zone, in square cells (1 cell = 1 m)
-  let area = 0;
-  for (const [n, b] of Object.entries(st.bySize)) area += Number(n) * Number(n) * b.solved;
+  let total = 0;
+  for (const [n, b] of Object.entries(st.bySize)) total += Number(n) * Number(n) * b.solved;
   const rows: [string, string][] = [
     ['Zones solved', String(st.zonesSolved)],
-    ['Area cleared', `${area.toLocaleString('en-US')} m²`],
+    ['Area cleared', area(total)],
     ['Time solving', fmt(st.totalSolveMs)],
     save.mode === 'mosaic'
       ? ['Farthest from home', formatMetres(st.farthestM)]
       : ['Deepest reached', st.deepest ? `Depth ${st.deepest}` : '–'],
     ['Total play time', fmt(st.totalPlayMs)],
   ];
-  $('#stats-grid').innerHTML = rows
-    .map(([k, v]) => `<div class="stat"><div class="stat-v">${v}</div><div class="stat-k">${k}</div></div>`)
-    .join('');
+  $('#stats-grid').innerHTML = statGrid(rows);
   const sizes = Object.keys(st.bySize)
     .map(Number)
     .sort((a, b) => a - b);
@@ -569,11 +641,15 @@ function renderStats() {
           return `<tr><td>${n}×${n}</td><td>${b.solved}</td><td>${b.bestMs === null ? '–' : fmt(b.bestMs)}</td><td>${fmt(b.totalMs / b.solved)}</td></tr>`;
         })
         .join('')}</tbody></table>`
-    : '<p class="muted">Solve a puzzle to see your times for each grid size.</p>';
-  $('#pause-mode').textContent = modeTitle();
+    : '<p class="muted">Solve a Shikaku to see your times for each grid size.</p>';
+  $('#pause-mode').innerHTML = pills(worldPills(save.mode, save.tileSize));
 }
+const statGrid = (rows: [string, string][]) =>
+  rows.map(([k, v]) => `<div class="stat"><div class="stat-v">${esc(v)}</div><div class="stat-k">${esc(k)}</div></div>`).join('');
+
 function openPause() {
-  if (!inGame) return;
+  if (!inGame || runPhase === 'over' || runPhase === 'countdown') return;
+  if (run) return openRunPause();
   renderStats();
   pauseModal.hidden = false;
   saveNow();
@@ -588,7 +664,7 @@ $('#btn-menu').addEventListener('click', endSession);
 document.querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', closeModals));
 document.querySelectorAll('.modal').forEach((m) =>
   m.addEventListener('click', (e) => {
-    if (e.target === m) closeModals();
+    if (e.target === m && m !== resultsModal) closeModals();
   }),
 );
 continueBtn.addEventListener('click', doContinue);
@@ -601,11 +677,15 @@ homeBtn.addEventListener('click', goHome);
 // ---------- sessions & menu ----------
 const HELP_MODE: Record<ModeId, string> = {
   classic:
-    'Puzzles grow as you travel, from 6×6 all the way to 24×24. To break into a bigger puzzle, clear <b>one whole side</b> of it plus <b>one corner piece</b> next to that side.',
+    'Your Shikaku grow as you travel, from 6×6 all the way to 24×24. To break into a bigger one, clear <b>one whole side</b> of it plus <b>one corner piece</b> next to that side.',
   fixed:
-    'Every puzzle is the size you chose, and they get trickier the farther you roam. Clear any neighbour to open a new one.',
+    'Every Shikaku is the size you chose, and they get trickier the farther you roam. Clear any neighbour to open a new one.',
   mosaic:
-    'Your world mixes puzzles of every size and is never the same twice. Clear <b>every puzzle along one side</b> of a locked zone to open it. The top of the screen shows how far you are from home.',
+    'Your world mixes Shikaku of every size and is never the same twice. Clear <b>every Shikaku along one side</b> of a locked zone to open it. The top of the screen shows how far you are from home.',
+};
+const HELP_RUN: Record<RunStyle, string> = {
+  timeattack: 'Clear as much Shikaku ground as you can before the clock hits zero. Every cell counts. ',
+  survival: 'Solve Shikaku to bank time. Bigger grids pay more. ',
 };
 
 async function makeLayout(d: SaveData): Promise<WorldLayout> {
@@ -649,8 +729,11 @@ async function startSession(d: SaveData) {
   }
   menuStatus('');
   setSession(L, d, true);
+  run = null;
+  runPhase = null;
   inGame = true;
   document.body.classList.add('in-game');
+  document.body.classList.remove('in-run');
   menuEl.hidden = true;
   $('#help-mode').innerHTML = HELP_MODE[d.mode];
   saveNow();
@@ -661,12 +744,18 @@ async function startSession(d: SaveData) {
 function endSession() {
   saveNow();
   closeModals();
+  resultsModal.hidden = true;
+  stopCountdown();
+  const style: MenuStyle = run ? run.style : 'endless';
+  run = null;
+  runPhase = null;
   inGame = false;
-  document.body.classList.remove('in-game');
+  document.body.classList.remove('in-game', 'in-run');
   continueBtn.hidden = true;
   easierBtn.hidden = true;
-  renderMenu();
+  hideToast();
   menuEl.hidden = false;
+  showStyle(style);
 }
 
 function newGame(m: ModeId, tileSize?: number) {
@@ -675,19 +764,242 @@ function newGame(m: ModeId, tileSize?: number) {
   startSession(freshSave(m, tileSize));
 }
 
+// ---------- runs: Time Attack & Survival ----------
+const countdownEl = $('#countdown');
+let countdownTimer: number | undefined;
+function stopCountdown() {
+  window.clearTimeout(countdownTimer);
+  countdownEl.hidden = true;
+}
+/** "3, 2, 1, Go" with the board visible but locked, then the run clock starts. */
+function startCountdown(sub: string) {
+  if (!run) return;
+  stopCountdown();
+  runPhase = 'countdown';
+  preview = null;
+  mode = { kind: 'none' };
+  ptrs.clear();
+  dirty = true;
+  countdownEl.hidden = false;
+  countdownEl.querySelector('.countdown-sub')!.textContent = sub;
+  const num = countdownEl.querySelector<HTMLElement>('.countdown-num')!;
+  let n = 3;
+  const step = () => {
+    if (n < 0) {
+      stopCountdown();
+      runPhase = 'live';
+      lastTick = performance.now();
+      return;
+    }
+    num.textContent = n > 0 ? String(n) : 'Go!';
+    num.classList.remove('tick');
+    void num.offsetWidth;
+    num.classList.add('tick');
+    countdownTimer = window.setTimeout(step, n > 0 ? 700 : 450);
+    n--;
+  };
+  step();
+}
+
+async function startRun(r: RunState, resume?: SaveData) {
+  const d = resume ?? { ...freshSave(r.world, r.tileSize), seenHelp: true };
+  menuStatus('Building your world…');
+  let L: WorldLayout;
+  try {
+    L = await makeLayout(d);
+  } catch {
+    menuStatus("Couldn't build your world. Check your connection and try again.");
+    return;
+  }
+  menuStatus('');
+  resultsModal.hidden = true;
+  closeModals();
+  setSession(L, d, !!resume);
+  run = r;
+  inGame = true;
+  document.body.classList.add('in-game', 'in-run');
+  menuEl.hidden = true;
+  $('#help-mode').innerHTML = HELP_RUN[r.style] + HELP_MODE[r.world];
+  saveNow();
+  updateHud();
+  startCountdown(
+    resume
+      ? 'Welcome back'
+      : r.style === 'timeattack'
+        ? `Clear all you can in ${r.minutes} minutes`
+        : 'Every Shikaku buys you time',
+  );
+}
+
+function floatText(z: Zone, text: string) {
+  const [cx, cy] = zoneCenter(z);
+  const b = canvas.getBoundingClientRect();
+  let [x, y] = renderer.toScreen(cam, cx, cy);
+  x = Math.min(Math.max(x, 60), renderer.w - 60);
+  y = Math.min(Math.max(y, 120), renderer.h - 120);
+  const el = document.createElement('div');
+  el.className = 'float-bonus';
+  el.textContent = text;
+  el.style.left = `${x + b.left}px`;
+  el.style.top = `${y + b.top}px`;
+  document.body.append(el);
+  window.setTimeout(() => el.remove(), 1400);
+}
+
+function onRunSolved(z: Zone, newlyOpen: Zone[]) {
+  if (!run) return;
+  const bonus = creditSolve(run, z.size);
+  for (const o of newlyOpen) zones.request(o, true);
+  floatText(z, run.style === 'survival' ? `+${Math.round(bonus / 1000)}s` : `+${area(z.size * z.size)}`);
+  const bigger = layout.expansionBanner ? newlyOpen.find((o) => !save.seenSizes.includes(o.size)) : undefined;
+  if (bigger) {
+    save.seenSizes.push(bigger.size);
+    showBanner('The world expands', `Bigger ${bigger.size}×${bigger.size} Shikaku from here on`);
+  }
+  saveNow();
+  updateHud();
+  if (navigator.vibrate) {
+    try {
+      navigator.vibrate(30);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function runPills(r: RunState): (string | [string, string])[] {
+  return [[STYLE_NAMES[r.style], 'gold'], ...worldPills(r.world, r.tileSize).map((p) => (typeof p === 'string' ? p : p[0])), ...(r.minutes ? [`${r.minutes} min`] : [])];
+}
+
+function openRunPause() {
+  if (!run) return;
+  saveNow();
+  $('#run-pause-sub').innerHTML = pills(runPills(run));
+  const rows: [string, string][] = [
+    ['Time left', clock(run.clockMs)],
+    ['Area cleared', area(run.area)],
+    ['Zones solved', String(run.zones)],
+    run.style === 'survival' ? ['Survived', fmt(run.elapsedMs)] : ['Time played', fmt(run.elapsedMs)],
+  ];
+  $('#run-pause-stats').innerHTML = statGrid(rows);
+  $('#btn-run-quit').textContent = run.style === 'survival' ? 'Save and quit' : 'Quit';
+  runPauseModal.hidden = false;
+}
+
+function endRun() {
+  if (!run) return;
+  run.clockMs = 0;
+  runPhase = 'over';
+  preview = null;
+  mode = { kind: 'none' };
+  const key = recordKey(run.style, run.world, run.tileSize, run.minutes);
+  const previous = getRecord(key);
+  const isBest = submitRecord(run);
+  if (run.style === 'survival') clearSurvival(run.world, run.tileSize);
+  closeModals();
+  showResults(run, isBest, previous);
+  updateHud();
+}
+
+function showResults(r: RunState, isBest: boolean, previous: ReturnType<typeof getRecord>) {
+  $('#results-badge').hidden = !isBest;
+  $('#results-kicker').innerHTML = pills(runPills(r));
+  $('#results-kicker').className = 'results-kicker pill-row results-pills';
+  const sizes = Object.keys(r.bySize).map(Number).sort((a, b) => a - b);
+  const items: (string | [string, string])[] = [];
+  if (r.style === 'timeattack') {
+    $('#results-score').textContent = area(r.area);
+    $('#results-caption').textContent = 'of Shikaku cleared';
+    items.push(zonesText(r.zones));
+  } else {
+    $('#results-score').textContent = fmt(r.elapsedMs);
+    $('#results-caption').textContent = 'of Shikaku survived';
+    items.push(area(r.area), zonesText(r.zones));
+  }
+  if (sizes.length) items.push(`Biggest ${sizes[sizes.length - 1]}×${sizes[sizes.length - 1]}`);
+  if (!isBest && previous)
+    items.push([r.style === 'timeattack' ? `Best ${area(previous.area)}` : `Best ${fmt(previous.survivedMs ?? 0)}`, 'gold']);
+  $('#results-pills').innerHTML = pills(items);
+  $('#results-sizes').innerHTML = sizes.length
+    ? `<table><thead><tr><th>Grid</th><th>Solved</th><th>Area</th></tr></thead><tbody>${sizes
+        .map((n) => `<tr><td>${n}×${n}</td><td>${r.bySize[n]}</td><td>${area(n * n * r.bySize[n])}</td></tr>`)
+        .join('')}</tbody></table>`
+    : '<p class="muted">No Shikaku cleared this time. Go again?</p>';
+  resultsModal.hidden = false;
+}
+
+$('#btn-run-resume').addEventListener('click', closeModals);
+$('#btn-run-restart').addEventListener('click', () => {
+  if (!run || !confirm('Restart this run from the beginning?')) return;
+  const r = run;
+  if (r.style === 'survival') clearSurvival(r.world, r.tileSize);
+  runPauseModal.hidden = true;
+  startRun(newRun(r.style, r.world, r.tileSize, r.minutes));
+});
+$('#btn-run-quit').addEventListener('click', () => {
+  if (!run) return;
+  if (run.style === 'timeattack' && !confirm('Leave this run? It will not count.')) return;
+  endSession();
+});
+$('#btn-again').addEventListener('click', () => {
+  if (!run) return;
+  const r = run;
+  startRun(newRun(r.style, r.world, r.tileSize, r.minutes));
+});
+$('#btn-results-menu').addEventListener('click', endSession);
+
+// ---------- menu ----------
+type MenuStyle = 'endless' | RunStyle;
+const STYLE_COPY: Record<MenuStyle, { title: string; pitch: string }> = {
+  endless: {
+    title: 'Endless',
+    pitch: "Explore your own Shikaku world at your own pace. It's saved, so you can always pick up where you left off.",
+  },
+  timeattack: { title: 'Time Attack', pitch: 'Beat the clock. Clear as much Shikaku ground as you can before time runs out.' },
+  survival: { title: 'Survival', pitch: 'Every Shikaku you solve buys you more time. How long can you last?' },
+};
+const WORLD_DESC: Record<ModeId, string> = {
+  classic: 'Starts small and grows bigger the farther you go.',
+  fixed: 'One grid size, all the way. You pick it.',
+  mosaic: 'Every size, all mixed up, never the same twice.',
+};
+
 const menuEl = $('#menu');
+let menuStyle: MenuStyle | null = null;
 function menuStatus(msg: string) {
   $('#menu-status').textContent = msg;
 }
 function ago(t: number) {
   const m = Math.round((Date.now() - t) / 60000);
-  if (m < 1) return 'just now';
+  if (m < 1) return 'Just now';
   if (m < 60) return `${m} min ago`;
   const h = Math.round(m / 60);
   if (h < 24) return `${h} h ago`;
   return `${Math.round(h / 24)} d ago`;
 }
-function renderMenu() {
+
+function showHome() {
+  menuStyle = null;
+  menuStatus('');
+  $('#menu-home').hidden = false;
+  $('#menu-style').hidden = true;
+}
+
+function showStyle(style: MenuStyle) {
+  menuStyle = style;
+  menuStatus('');
+  $('#menu-home').hidden = true;
+  $('#menu-style').hidden = false;
+  $('#style-title').textContent = STYLE_COPY[style].title;
+  $('#style-pitch').textContent = STYLE_COPY[style].pitch;
+  $('#endless-panel').hidden = style !== 'endless';
+  $('#run-panel').hidden = style === 'endless';
+  if (style === 'endless') renderEndless();
+  else renderRunPanel();
+  menuEl.scrollTop = 0;
+}
+
+function renderEndless() {
   for (const m of ['classic', 'fixed', 'mosaic'] as ModeId[]) {
     const card = $(`.mode-card[data-mode="${m}"]`);
     const sum = summarize(m);
@@ -695,12 +1007,94 @@ function renderMenu() {
     const line = card.querySelector<HTMLElement>('.mode-save')!;
     cont.hidden = !sum;
     if (sum) {
-      const where = m === 'mosaic' ? formatMetres(sum.farthestM) : `depth ${sum.deepest || 1}`;
-      const size = m === 'fixed' ? `${sum.tileSize}×${sum.tileSize} · ` : '';
-      line.textContent = `${size}${sum.zonesSolved} solved · ${where} · ${fmt(sum.totalPlayMs)} played · ${ago(sum.lastPlayed)}`;
-    } else line.textContent = 'No saved game';
+      line.innerHTML = pills([
+        ...(m === 'fixed' ? [[`${sum.tileSize}×${sum.tileSize}`, 'gold'] as [string, string]] : []),
+        `${sum.zonesSolved} solved`,
+        m === 'mosaic' ? formatMetres(sum.farthestM) : `Depth ${sum.deepest || 1}`,
+        `${fmt(sum.totalPlayMs)} played`,
+        [ago(sum.lastPlayed), 'dim'],
+      ]);
+    } else line.innerHTML = pills([['No saved world yet', 'dim']]);
   }
 }
+
+const prefs = loadPrefs();
+function runSettings() {
+  const style = menuStyle as RunStyle;
+  const p = style === 'timeattack' ? prefs.ta : prefs.sv;
+  return { style, world: p.world, size: p.size, minutes: style === 'timeattack' ? prefs.ta.minutes : undefined };
+}
+function setChecked(container: HTMLElement, attr: string, value: string) {
+  container.querySelectorAll<HTMLElement>('.seg-btn').forEach((b) => b.setAttribute('aria-checked', String(b.dataset[attr] === value)));
+}
+function renderRunPanel() {
+  const { style, world, size, minutes } = runSettings();
+  setChecked($('#run-world'), 'world', world);
+  $('#run-world-desc').textContent = WORLD_DESC[world];
+  $('#run-size-field').hidden = world !== 'fixed';
+  setChecked($('#run-sizes'), 'size', String(size));
+  $('#run-minutes-field').hidden = style !== 'timeattack';
+  setChecked($('#run-minutes'), 'minutes', String(minutes));
+  const tile = world === 'fixed' ? size : undefined;
+  const rec = getRecord(recordKey(style, world, tile, minutes));
+  $('#run-best').innerHTML = rec
+    ? pills(
+        style === 'timeattack'
+          ? [[area(rec.area), 'gold'], zonesText(rec.zones)]
+          : [[fmt(rec.survivedMs ?? 0), 'gold'], area(rec.area), zonesText(rec.zones)],
+      )
+    : pills([['No record yet', 'dim']]);
+  const slot = style === 'survival' ? loadSurvival(world, tile) : null;
+  $('#sv-saved').hidden = !slot;
+  $('#btn-run-start').hidden = !!slot;
+  if (slot)
+    $('#sv-saved-pills').innerHTML = pills([
+      [`${clock(slot.run.clockMs)} left`, 'gold'],
+      area(slot.run.area),
+      zonesText(slot.run.zones),
+      `${fmt(slot.run.elapsedMs)} survived`,
+    ]);
+}
+$('#run-sizes').innerHTML = FIXED_SIZES.map((n) => `<button class="seg-btn" data-size="${n}" role="radio">${n}×${n}</button>`).join('');
+$('#run-minutes').innerHTML = TA_MINUTES.map((n) => `<button class="seg-btn" data-minutes="${n}" role="radio">${n} min</button>`).join('');
+function updatePrefs(change: (p: { world: ModeId; size: number; minutes?: number }) => void) {
+  const p = menuStyle === 'timeattack' ? prefs.ta : prefs.sv;
+  change(p);
+  savePrefs(prefs);
+  renderRunPanel();
+}
+$('#run-world').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('.seg-btn');
+  if (b) updatePrefs((p) => (p.world = b.dataset.world as ModeId));
+});
+$('#run-sizes').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('.seg-btn');
+  if (b) updatePrefs((p) => (p.size = Number(b.dataset.size)));
+});
+$('#run-minutes').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('.seg-btn');
+  if (b) updatePrefs((p) => (p.minutes = Number(b.dataset.minutes)));
+});
+$('#btn-run-start').addEventListener('click', () => {
+  const { style, world, size, minutes } = runSettings();
+  startRun(newRun(style, world, size, minutes));
+});
+$('#btn-sv-continue').addEventListener('click', () => {
+  const { world, size } = runSettings();
+  const slot = loadSurvival(world, world === 'fixed' ? size : undefined);
+  if (slot) startRun(slot.run, slot.save);
+});
+$('#btn-sv-new').addEventListener('click', () => {
+  const { world, size } = runSettings();
+  if (!confirm('Start a new run? Your run in progress will be lost.')) return;
+  clearSurvival(world, world === 'fixed' ? size : undefined);
+  startRun(newRun('survival', world, size));
+});
+
+document.querySelectorAll<HTMLButtonElement>('.style-btn').forEach((b) =>
+  b.addEventListener('click', () => showStyle(b.dataset.style as MenuStyle)),
+);
+$('#btn-back').addEventListener('click', showHome);
 document.querySelectorAll<HTMLButtonElement>('.mode-card button').forEach((btn) =>
   btn.addEventListener('click', () => {
     const m = btn.closest<HTMLElement>('.mode-card')!.dataset.mode as ModeId;
@@ -728,7 +1122,20 @@ const AUTOSAVE_MS = 5000;
 function frame(now: number) {
   const dt = Math.min(1000, now - lastTick);
   lastTick = now;
-  if (inGame && !document.hidden && !anyModalOpen()) {
+  if (inGame && run) {
+    if (runPhase === 'live' && !document.hidden && !anyModalOpen()) {
+      run.clockMs -= dt;
+      run.elapsedMs += dt;
+      if (run.style === 'survival') {
+        saveAcc += dt;
+        if (saveAcc > 2000) {
+          saveAcc = 0;
+          saveNow();
+        }
+      }
+      if (run.clockMs <= 0) endRun();
+    }
+  } else if (inGame && !document.hidden && !anyModalOpen()) {
     save.stats.totalPlayMs += dt;
     const z = timerRunning();
     if (z) save.timers[z.key] += dt;
@@ -775,7 +1182,7 @@ onResize();
 
 // start on the menu over an idle backdrop
 setSession(layout, save, false);
-renderMenu();
+showHome();
 menuEl.hidden = false;
 requestAnimationFrame(frame);
 
@@ -807,6 +1214,20 @@ const zoneOf = (key: string) => zoneByKey(layout, key) ?? layout.origin;
   neighbours: (key: string) => edgeNeighbours(layout, zoneOf(key)),
   flyTo: (key: string) => flyTo(zoneOf(key)),
   idle: () => !camAnim,
+  get run() {
+    return run;
+  },
+  get runPhase() {
+    return runPhase;
+  },
+  skipCountdown: () => {
+    stopCountdown();
+    if (run) runPhase = 'live';
+  },
+  /** test helper: take time off the run clock */
+  fastForward: (ms: number) => {
+    if (run) run.clockMs = Math.max(1, run.clockMs - ms);
+  },
   timerRunning: () => timerRunning()?.key ?? null,
   rects: (key: string) => world.rects(key).length,
   /** test helper: mark the n open zones nearest the centre solved, without playing them */

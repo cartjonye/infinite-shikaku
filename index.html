@@ -13,7 +13,8 @@
     <header class="hud-top">
       <div class="brand">Infinite<span>Shikaku</span></div>
       <div class="zone-info">
-        <div id="zone-label">Zone 0, 0</div>
+        <div id="run-pills" class="pill-row" hidden></div>
+        <div id="zone-label" class="pill-row"></div>
         <div id="timer">00:00</div>
       </div>
       <div class="actions">
@@ -28,7 +29,7 @@
     <div class="hud-bottom">
       <button id="continue" hidden>Continue <span aria-hidden="true">→</span></button>
     </div>
-    <button id="btn-easier" class="tool-btn easier" hidden aria-label="Easier puzzle" title="Take a breather on a smaller puzzle (E)">
+    <button id="btn-easier" class="tool-btn easier" hidden aria-label="Easier Shikaku" title="Take a breather on a smaller Shikaku (E)">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="3" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="15" y="15" width="6" height="6" rx="1.5" fill="currentColor"/><path d="M13 13l3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       <span>Easier</span>
     </button>
@@ -60,7 +61,7 @@
         <p>Drag across cells to draw a rectangle. Tap a rectangle to remove it. Tap a <b>1</b> to fill it.</p>
         <p>Solve a zone to unlock its neighbours, then hit <b>Continue</b> to glide to the next one. The world never ends, and it gets harder the further you travel.</p>
         <p id="help-mode"></p>
-        <p class="muted">Your clock starts with your first rectangle and pauses whenever you look away or zoom out. Stuck? Tap <b>Easier</b> for a smaller puzzle nearby.</p>
+        <p class="muted">Your clock starts with your first rectangle and pauses whenever you look away or zoom out. Stuck? Tap <b>Easier</b> for a smaller Shikaku nearby.</p>
         <p class="muted">The gold house marks where you started; the house button takes you back. Zoom with + / − or fit the view with ⤢.</p>
         <p class="muted">Drag on empty space to pan. Pinch or scroll to zoom. Pause (Esc) shows your stats. Progress saves automatically on this device, separately for each mode.</p>
         <button class="primary" data-close>Let's go</button>
@@ -70,7 +71,7 @@
     <div id="pause-modal" class="modal" hidden>
       <div class="sheet">
         <h2>Paused</h2>
-        <div id="pause-mode" class="sheet-sub"></div>
+        <div id="pause-mode" class="pill-row sheet-pills"></div>
         <div id="stats-grid" class="stats-grid"></div>
         <div id="stats-sizes" class="stats-sizes"></div>
         <div class="stack">
@@ -92,48 +93,142 @@
       </div>
     </div>
 
+    <div id="run-pause-modal" class="modal" hidden>
+      <div class="sheet">
+        <h2>Paused</h2>
+        <div id="run-pause-sub" class="pill-row sheet-pills"></div>
+        <div id="run-pause-stats" class="stats-grid"></div>
+        <div class="stack">
+          <button id="btn-run-resume" class="primary">Resume</button>
+          <div class="row">
+            <button id="btn-run-restart" class="secondary">Restart</button>
+            <button id="btn-run-quit" class="secondary">Quit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="results-modal" class="modal" hidden>
+      <div class="sheet results">
+        <div id="results-badge" class="best-badge" hidden>New best</div>
+        <div id="results-kicker" class="results-kicker"></div>
+        <div id="results-score" class="results-score"></div>
+        <div id="results-caption" class="results-caption"></div>
+        <div id="results-pills" class="pill-row results-pills"></div>
+        <div id="results-sizes" class="stats-sizes"></div>
+        <div class="stack">
+          <button id="btn-again" class="primary">Play again</button>
+          <button id="btn-results-menu" class="secondary">Menu</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="countdown" class="countdown" hidden>
+      <div class="countdown-num"></div>
+      <div class="countdown-sub"></div>
+    </div>
+
     <div id="menu" class="menu" hidden>
       <div class="menu-inner">
-        <div class="menu-title">Infinite<span>Shikaku</span></div>
-        <p class="menu-tag">Never-ending Shikaku.</p>
-        <div class="mode-list">
-          <section class="mode-card" data-mode="classic">
-            <div class="mode-head">
-              <h3>Classic</h3>
-              <span class="mode-badge">The journey</span>
+        <section id="menu-home" class="menu-screen">
+          <div class="menu-title">Infinite<span>Shikaku</span></div>
+          <p class="menu-tag">Never-ending Shikaku.</p>
+          <div class="style-list">
+            <button class="style-btn" data-style="endless">
+              <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M7.5 8.5c-2 0-3.5 1.6-3.5 3.5s1.5 3.5 3.5 3.5c3 0 6-7 9-7 2 0 3.5 1.6 3.5 3.5s-1.5 3.5-3.5 3.5c-3 0-6-7-9-7z" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linejoin="round"/></svg>
+              <span>Endless</span>
+            </button>
+            <button class="style-btn" data-style="timeattack">
+              <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5" stroke="currentColor" stroke-width="2.2" fill="none"/><path d="M12 9.5v4.2l2.8 1.7M9.5 3h5M12 3v2.5" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>
+              <span>Time Attack</span>
+            </button>
+            <button class="style-btn" data-style="survival">
+              <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M12 20.5s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10.2-7.5 10.2z" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linejoin="round"/><path d="M7 12h2.5l1.5-2.5 2 5 1.5-2.5H17" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>Survival</span>
+            </button>
+          </div>
+        </section>
+
+        <section id="menu-style" class="menu-screen" hidden>
+          <button id="btn-back" class="back-btn" aria-label="Back to main menu">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Back
+          </button>
+          <h2 id="style-title" class="style-title"></h2>
+          <p id="style-pitch" class="style-pitch"></p>
+
+          <div id="endless-panel" class="mode-list">
+            <section class="mode-card" data-mode="classic">
+              <div class="mode-head">
+                <h3>Classic</h3>
+                <span class="mode-badge">The journey</span>
+              </div>
+              <p>Start small and push outward. Every step brings bigger grids and tougher Shikaku.</p>
+              <div class="mode-save pill-row"></div>
+              <div class="mode-actions">
+                <button class="primary" data-action="continue">Continue</button>
+                <button class="secondary" data-action="new">New</button>
+              </div>
+            </section>
+            <section class="mode-card" data-mode="fixed">
+              <div class="mode-head">
+                <h3>Fixed</h3>
+                <span class="mode-badge">Your pace</span>
+              </div>
+              <p>Pick your favourite grid and play it forever. Quick 6×6 breaks or epic 24×24 marathons.</p>
+              <div class="mode-save pill-row"></div>
+              <div class="mode-actions">
+                <button class="primary" data-action="continue">Continue</button>
+                <button class="secondary" data-action="new">New</button>
+              </div>
+            </section>
+            <section class="mode-card" data-mode="mosaic">
+              <div class="mode-head">
+                <h3>Mosaic</h3>
+                <span class="mode-badge">One of a kind</span>
+              </div>
+              <p>Small and huge Shikaku side by side, in a world no one else will ever see. How far from home can you go?</p>
+              <div class="mode-save pill-row"></div>
+              <div class="mode-actions">
+                <button class="primary" data-action="continue">Continue</button>
+                <button class="secondary" data-action="new">New</button>
+              </div>
+            </section>
+          </div>
+
+          <div id="run-panel" class="run-panel" hidden>
+            <div class="field">
+              <div class="field-label">World</div>
+              <div id="run-world" class="seg" role="radiogroup" aria-label="World">
+                <button class="seg-btn" data-world="classic" role="radio">Classic</button>
+                <button class="seg-btn" data-world="fixed" role="radio">Fixed</button>
+                <button class="seg-btn" data-world="mosaic" role="radio">Mosaic</button>
+              </div>
+              <div id="run-world-desc" class="field-desc"></div>
             </div>
-            <p>Start small and push outward. Every step brings bigger grids and tougher puzzles.</p>
-            <div class="mode-save"></div>
-            <div class="mode-actions">
-              <button class="primary" data-action="continue">Continue</button>
-              <button class="secondary" data-action="new">New game</button>
+            <div id="run-size-field" class="field" hidden>
+              <div class="field-label">Grid</div>
+              <div id="run-sizes" class="seg seg-wrap" role="radiogroup" aria-label="Grid size"></div>
             </div>
-          </section>
-          <section class="mode-card" data-mode="fixed">
-            <div class="mode-head">
-              <h3>Fixed</h3>
-              <span class="mode-badge">Your pace</span>
+            <div id="run-minutes-field" class="field">
+              <div class="field-label">Time</div>
+              <div id="run-minutes" class="seg" role="radiogroup" aria-label="Time limit"></div>
             </div>
-            <p>Pick your favourite grid and play it forever. Quick 6×6 breaks or epic 24×24 marathons.</p>
-            <div class="mode-save"></div>
-            <div class="mode-actions">
-              <button class="primary" data-action="continue">Continue</button>
-              <button class="secondary" data-action="new">New game</button>
+            <div class="best-row">
+              <div class="field-label">Personal best</div>
+              <div id="run-best" class="pill-row"></div>
             </div>
-          </section>
-          <section class="mode-card" data-mode="mosaic">
-            <div class="mode-head">
-              <h3>Mosaic</h3>
-              <span class="mode-badge">One of a kind</span>
+            <div id="sv-saved" class="saved-run" hidden>
+              <div class="field-label">Run in progress</div>
+              <div id="sv-saved-pills" class="pill-row"></div>
+              <div class="mode-actions">
+                <button id="btn-sv-continue" class="primary">Continue</button>
+                <button id="btn-sv-new" class="secondary">New run</button>
+              </div>
             </div>
-            <p>Small and huge puzzles side by side, in a world no one else will ever see. How far from home can you go?</p>
-            <div class="mode-save"></div>
-            <div class="mode-actions">
-              <button class="primary" data-action="continue">Continue</button>
-              <button class="secondary" data-action="new">New game</button>
-            </div>
-          </section>
-        </div>
+            <button id="btn-run-start" class="primary start-btn">Start</button>
+          </div>
+        </section>
         <div id="menu-status" class="menu-status" role="status" aria-live="polite"></div>
       </div>
     </div>

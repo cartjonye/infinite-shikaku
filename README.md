@@ -2,7 +2,17 @@
 
 An endless, seamless Shikaku world. You solve a zone by splitting it into rectangles: each rectangle holds exactly one number, and that number is its area. Solving zones unlocks more of the world.
 
-## Modes
+## Play styles
+
+The main menu offers three play styles:
+
+- **Endless**: the three worlds below, each with its own save (Continue or New).
+- **Time Attack**: clear as much area as possible in 2, 5 or 10 minutes, in a fresh world of your choice. Not saved; personal bests are kept per world and length.
+- **Survival**: start with 30 seconds; every solved zone adds time by grid size (6×6 10 s, 8×8 15 s, 10×10 22 s, 12×12 28 s, 15×15 40 s, 16×16 44 s, 18×18 52 s, 20×20 61 s, 24×24 80 s). A run in progress is saved per world and resumes after a 3, 2, 1 countdown; personal bests rank by time survived.
+
+Run logic lives in `src/runs.ts`.
+
+## Worlds
 
 Each mode has its own save, so the menu offers **Continue** or **New game** per mode.
 
