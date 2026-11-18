@@ -29,6 +29,8 @@ const PALETTE = [
 ];
 
 const FADE_MS = 700;
+/** how long a wrong attempt stays visible while fading out */
+const FAIL_FADE_MS = 1000;
 
 /** Below this many pixels per cell the clue numbers are hidden and the board is not playable. */
 export const MIN_PLAY_ZOOM = 9;
@@ -266,15 +268,20 @@ export class Renderer {
 
     this.homeBadge(cam, world, now);
 
-    // the one failed attempt: red with an X
+    // the last wrong attempt: a red flash that fades out over FAIL_FADE_MS
     const failed = world.failed;
-    if (failed && world.status(failed.zone) === 'open') {
-      const zg = zoneGap / 2;
-      const b = this.box(cam, failed.zone, failed.rect, { l: zg, r: zg, t: zg, b: zg });
-      this.failMark(b, rad, s);
+    if (failed) {
+      const alpha = 1 - (now - failed.at) / FAIL_FADE_MS;
+      if (alpha <= 0 || world.status(failed.zone) !== 'open') world.failed = null;
+      else {
+        const zg = zoneGap / 2;
+        const b = this.box(cam, failed.zone, failed.rect, { l: zg, r: zg, t: zg, b: zg });
+        this.failMark(b, rad, s, alpha);
+        animating = true;
+      }
     }
 
-    // drag preview: green = will place, red X = wrong, grey = touches no number
+    // drag preview: green = will place, red = wrong, grey = touches no number
     if (preview) {
       const p = zones.get(preview.zone);
       const zg = zoneGap / 2;
@@ -478,26 +485,18 @@ export class Renderer {
     });
   }
 
-  /** A wrong rectangle: translucent red with a red outline and an X corner to corner. */
-  private failMark(b: { x: number; y: number; w: number; h: number }, rad: number, s: number) {
+  /** A wrong rectangle: translucent red with a red outline, scaled by alpha for the fade-out. */
+  private failMark(b: { x: number; y: number; w: number; h: number }, rad: number, s: number, alpha = 1) {
     const c = this.ctx;
-    c.fillStyle = 'rgba(255,107,107,0.22)';
+    c.save();
+    c.globalAlpha = alpha;
+    c.fillStyle = 'rgba(255,107,107,0.28)';
     this.rr(b.x, b.y, b.w, b.h, rad);
     c.fill();
     c.strokeStyle = this.colors.bad;
     c.lineWidth = Math.max(1.5, s * 0.07);
     c.stroke();
-    const inset = Math.min(b.w, b.h) * 0.18 + rad * 0.3;
-    // the X stays light so the numbers underneath remain readable
-    c.strokeStyle = 'rgba(255,107,107,0.55)';
-    c.lineWidth = Math.max(2, s * 0.08);
-    c.lineCap = 'round';
-    c.beginPath();
-    c.moveTo(b.x + inset, b.y + inset);
-    c.lineTo(b.x + b.w - inset, b.y + b.h - inset);
-    c.moveTo(b.x + b.w - inset, b.y + inset);
-    c.lineTo(b.x + inset, b.y + b.h - inset);
-    c.stroke();
+    c.restore();
   }
 
   private lock(x: number, y: number, size: number) {

@@ -34,8 +34,8 @@ export const sideScore = (s: SideState) =>
 export class World {
   solved: Set<string>;
   solvedAt = new Map<string, number>();
-  /** the one wrong attempt shown on the board (red with an ✕); never part of a solution */
-  failed: { zone: Zone; rect: Rect } | null = null;
+  /** the last wrong attempt: a red flash that fades out; never part of a solution */
+  failed: { zone: Zone; rect: Rect; at: number } | null = null;
   /** every unlocked, unsolved zone; kept up to date incrementally on each solve */
   private open = new Map<string, Zone>();
 

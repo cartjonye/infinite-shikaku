@@ -15,7 +15,7 @@ import {
 } from './layouts';
 import { MIN_PLAY_ZOOM, Renderer, type Camera, type Preview } from './render';
 import { clearSave, freshSave, loadSave, sanitize, summarize, writeSave, type SaveData } from './storage';
-import { rectContains, rectsOverlap, type Rect } from './types';
+import { rectsOverlap, type Rect } from './types';
 import {
   TA_MINUTES,
   clearSurvival,
@@ -287,15 +287,11 @@ function endPointer(e: PointerEvent, cancelled: boolean) {
     let acted = false;
     if (!mode.moved || rect.w * rect.h === 1) {
       // A tap (or a drag inside one cell) only does something on a number:
-      // remove the rectangle covering it, clear the red attempt, or fill a 1.
+      // remove the rectangle covering it, or fill a 1.
       const deliberate = mode.moved || (now - lastGestureAt > TAP_GUARD_MS && now - mode.t0 < LONG_PRESS_MS);
       const clue = p.clues.find((q) => q.r === rect.r && q.c === rect.c);
       if (deliberate && clue) {
-        const f = world.failed;
-        if (f && f.zone === z && rectContains(f.rect, clue.r, clue.c)) {
-          world.failed = null;
-          dirty = true;
-        } else {
+        {
           const gone = world.removeAt(k, clue.r, clue.c);
           if (gone) {
             acted = true;
@@ -323,8 +319,8 @@ function endPointer(e: PointerEvent, cancelled: boolean) {
         if (f && f.zone === z && rectsOverlap(f.rect, rect)) world.failed = null;
         acted = true;
       } else if (kind === 'fail') {
-        // keep the wrong attempt visible, without touching any placed rectangle
-        world.failed = { zone: z, rect: { ...rect } };
+        // flash the wrong attempt red for a moment, without touching any placed rectangle
+        world.failed = { zone: z, rect: { ...rect }, at: performance.now() };
         acted = true;
       }
       // a drag that touches no number does nothing at all
