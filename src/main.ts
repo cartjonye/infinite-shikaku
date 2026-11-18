@@ -608,6 +608,49 @@ const runPauseModal = $('#run-pause-modal');
 const resultsModal = $('#results-modal');
 const coachModal = $('#coach-modal');
 
+// ---------- confirm dialog (replaces the browser's confirm box) ----------
+const confirmModal = $('#confirm-modal');
+let confirmResolve: ((ok: boolean) => void) | null = null;
+function askConfirm(o: { title: string; body: string; ok: string; cancel?: string; danger?: boolean }): Promise<boolean> {
+  confirmResolve?.(false);
+  $('#confirm-title').textContent = o.title;
+  $('#confirm-body').textContent = o.body;
+  const ok = $<HTMLButtonElement>('#confirm-ok');
+  const cancel = $<HTMLButtonElement>('#confirm-cancel');
+  ok.textContent = o.ok;
+  ok.classList.toggle('danger-btn', !!o.danger);
+  cancel.textContent = o.cancel ?? 'Cancel';
+  confirmModal.hidden = false;
+  cancel.focus(); // a stray Enter should never destroy anything
+  return new Promise((resolve) => (confirmResolve = resolve));
+}
+function settleConfirm(ok: boolean) {
+  if (confirmModal.hidden) return;
+  confirmModal.hidden = true;
+  const r = confirmResolve;
+  confirmResolve = null;
+  r?.(ok);
+}
+$('#confirm-ok').addEventListener('click', () => settleConfirm(true));
+$('#confirm-cancel').addEventListener('click', () => settleConfirm(false));
+confirmModal.addEventListener('click', (e) => {
+  if (e.target === confirmModal) settleConfirm(false);
+});
+// handled before the game's own keys, so Esc closes only this dialog
+window.addEventListener(
+  'keydown',
+  (e) => {
+    if (confirmModal.hidden) return;
+    if (e.key === 'Escape') settleConfirm(false);
+    else if (e.key === 'Enter' && document.activeElement !== $('#confirm-cancel')) settleConfirm(true);
+    else if (e.key === 'Enter') settleConfirm(false);
+    else return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  },
+  true,
+);
+
 // ---------- controls card (shown once, replayable from How to play) ----------
 const COACH_KEY = 'infinite-shikaku:coach:v1';
 function coachSeen() {
@@ -618,7 +661,7 @@ function coachSeen() {
   }
 }
 const touchFirst = () => window.matchMedia?.('(pointer: coarse)').matches ?? false;
-function coachArt(kind: 'draw' | 'pan' | 'zoom', touch: boolean): string {
+function coachArt(kind: 'draw' | 'tap' | 'pan' | 'zoom', touch: boolean): string {
   const cells = (cols: number, rows: number, x0: number, y0: number, size: number, gap: number, num?: [number, number, string]) => {
     let out = '';
     for (let r = 0; r < rows; r++)
@@ -634,6 +677,13 @@ function coachArt(kind: 'draw' | 'pan' | 'zoom', touch: boolean): string {
     const pointer = touch ? finger('cc-draw-move', 34, 21) : cursor('cc-draw-move', 32, 18);
     return `<svg viewBox="0 0 120 90" aria-hidden="true">${cells(3, 3, 24, 11, 20, 4, [0, 0, '4'])}<rect x="24" y="11" width="44" height="44" rx="5" class="cc-rect cc-draw-grow"/>${pointer}</svg>`;
   }
+  if (kind === 'tap') {
+    // a placed rectangle over the 4; tapping the number removes it
+    const x = 34;
+    const y = 21;
+    const pointer = touch ? finger('cc-tap-move', x, y) : cursor('cc-tap-move', x - 2, y - 3);
+    return `<svg viewBox="0 0 120 90" aria-hidden="true">${cells(3, 3, 24, 11, 20, 4)}<rect x="24" y="11" width="44" height="44" rx="5" class="cc-rect cc-tap-rect"/><text x="34" y="26" class="cc-num">4</text><circle cx="${x}" cy="${y}" r="12" class="cc-ripple"/>${pointer}</svg>`;
+  }
   if (kind === 'pan') {
     const pointers = touch ? finger('cc-pan-move', 50, 46) + finger('cc-pan-move', 72, 46) : cursor('cc-pan-move', 56, 40);
     return `<svg viewBox="0 0 120 90" aria-hidden="true"><g class="cc-pan-move">${cells(5, 4, 4, 2, 20, 4, [2, 1, '6'])}</g>${pointers}</svg>`;
@@ -645,8 +695,9 @@ function coachArt(kind: 'draw' | 'pan' | 'zoom', touch: boolean): string {
 }
 function renderCoach() {
   const touch = touchFirst();
-  const items: [string, 'draw' | 'pan' | 'zoom', string][] = [
+  const items: [string, 'draw' | 'tap' | 'pan' | 'zoom', string][] = [
     ['Draw', 'draw', 'Drag across a number to draw'],
+    ['Undo', 'tap', `${touch ? 'Tap' : 'Click'} a number to remove its rectangle`],
     ['Move', 'pan', touch ? 'Two fingers to move around' : 'Drag empty ground to move around'],
     ['Zoom', 'zoom', touch ? 'Pinch to zoom' : 'Scroll to zoom'],
   ];
@@ -677,7 +728,8 @@ function anyModalOpen() {
     !sizeModal.hidden ||
     !runPauseModal.hidden ||
     !resultsModal.hidden ||
-    !coachModal.hidden
+    !coachModal.hidden ||
+    !confirmModal.hidden
   );
 }
 function closeModals() {
@@ -757,7 +809,7 @@ $('#btn-menu').addEventListener('click', endSession);
 document.querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', closeModals));
 document.querySelectorAll('.modal').forEach((m) =>
   m.addEventListener('click', (e) => {
-    if (e.target === m && m !== resultsModal) closeModals();
+    if (e.target === m && m !== resultsModal && m !== confirmModal) closeModals();
   }),
 );
 continueBtn.addEventListener('click', doContinue);
@@ -856,8 +908,17 @@ function endSession() {
   showStyle(style);
 }
 
-function newGame(m: ModeId, tileSize?: number) {
-  if (summarize(m) && !confirm(`Start a fresh ${MODE_NAMES[m]} world? Your current one will be lost.`)) return;
+async function newGame(m: ModeId, tileSize?: number) {
+  if (
+    summarize(m) &&
+    !(await askConfirm({
+      title: 'Start a fresh world?',
+      body: `Your current ${MODE_NAMES[m]} world will be lost.`,
+      ok: 'Start fresh',
+      danger: true,
+    }))
+  )
+    return;
   clearSave(m);
   startSession(freshSave(m, tileSize));
 }
@@ -1036,21 +1097,37 @@ function showResults(r: RunState, isBest: boolean, previous: ReturnType<typeof g
 }
 
 $('#btn-run-resume').addEventListener('click', closeModals);
-$('#btn-run-restart').addEventListener('click', () => {
-  if (!run || !confirm('Restart this run from the beginning?')) return;
+$('#btn-run-restart').addEventListener('click', async () => {
+  if (!run) return;
+  if (!(await askConfirm({ title: 'Restart this run?', body: "You'll start again from the beginning.", ok: 'Restart', danger: true })))
+    return;
+  if (!run) return;
   const r = run;
   if (r.style === 'survival') clearSurvival(r.world, r.tileSize);
   runPauseModal.hidden = true;
   startRun(newRun(r.style, r.world, r.tileSize, r.minutes));
 });
-$('#btn-run-quit').addEventListener('click', () => {
+$('#btn-run-quit').addEventListener('click', async () => {
   if (!run) return;
-  if (run.style === 'timeattack' && !confirm('Leave this run? It will not count.')) return;
+  if (
+    run.style === 'timeattack' &&
+    !(await askConfirm({ title: 'Leave this run?', body: "It won't count towards your best.", ok: 'Leave', danger: true }))
+  )
+    return;
   endSession();
 });
-$('#btn-run-surrender').addEventListener('click', () => {
+$('#btn-run-surrender').addEventListener('click', async () => {
   if (!run || run.style !== 'survival') return;
-  if (!confirm('Surrender this run? The time you survived still counts.')) return;
+  if (
+    !(await askConfirm({
+      title: 'Surrender?',
+      body: 'The run ends now. The time you survived still counts.',
+      ok: 'Surrender',
+      danger: true,
+    }))
+  )
+    return;
+  if (!run) return;
   runPauseModal.hidden = true;
   endRun(true);
 });
@@ -1197,9 +1274,10 @@ $('#btn-sv-continue').addEventListener('click', () => {
   const slot = loadSurvival(world, world === 'fixed' ? size : undefined);
   if (slot) startRun(slot.run, slot.save);
 });
-$('#btn-sv-new').addEventListener('click', () => {
+$('#btn-sv-new').addEventListener('click', async () => {
   const { world, size } = runSettings();
-  if (!confirm('Start a new run? Your run in progress will be lost.')) return;
+  if (!(await askConfirm({ title: 'Start a new run?', body: 'Your run in progress will be lost.', ok: 'Start new run', danger: true })))
+    return;
   clearSurvival(world, world === 'fixed' ? size : undefined);
   startRun(newRun('survival', world, size));
 });

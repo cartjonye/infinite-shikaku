@@ -525,6 +525,39 @@ body.in-run .modal { backdrop-filter: blur(18px); background: rgba(6, 7, 11, 0.8
 .mode-list[hidden] { display: none; }
 .surrender { color: #ff8a7a; border-color: rgba(255, 138, 122, 0.35); }
 .surrender[hidden] { display: none; }
+
+/* ---------- confirm dialog ---------- */
+.confirm-modal { z-index: 40; }
+body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); backdrop-filter: blur(3px); }
+.confirm { width: min(360px, 100%); text-align: center; animation: pop 0.22s ease-out; }
+.confirm h2 { font-size: 21px; margin-bottom: 8px; }
+.confirm p { margin-bottom: 4px; }
+.confirm .row button { flex: 1; }
+.primary.danger-btn { background: #ff6b6b; color: #1b1d26; }
+
+/* ---------- controls card: 2 x 2 ---------- */
+.coach .coach-items { grid-template-columns: repeat(2, 1fr); }
+.coach-item { display: flex; flex-direction: column; align-items: center; }
+.coach-item svg { max-width: 132px; }
+@media (max-width: 420px) {
+  .coach-item svg { max-width: 104px; }
+  .coach .coach-items { gap: 8px; }
+  .coach h2 { margin-bottom: 10px; }
+}
+.cc-tap-rect { animation: cc-tap-rect 2.6s ease-in-out infinite; }
+.cc-tap-move { animation: cc-tap-move 2.6s ease-in-out infinite; }
+.cc-ripple { fill: none; stroke: var(--accent); stroke-width: 2; transform-box: fill-box; transform-origin: center; opacity: 0; animation: cc-ripple 2.6s ease-out infinite; }
+@keyframes cc-tap-rect { 0%, 40% { opacity: 1; } 55%, 85% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes cc-tap-move {
+  0% { transform: translate(14px, 18px); opacity: 0; }
+  15% { opacity: 1; }
+  30%, 40% { transform: translate(0, 0); opacity: 1; }
+  36% { transform: translate(0, 0) scale(0.92); }
+  60% { transform: translate(0, 0); opacity: 0; }
+  100% { transform: translate(14px, 18px); opacity: 0; }
+}
+@keyframes cc-ripple { 0%, 36% { opacity: 0; transform: scale(0.3); } 40% { opacity: 1; } 62% { opacity: 0; transform: scale(1.6); } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cc-tap-rect, .cc-tap-move, .cc-ripple { animation: none; } }
 .countdown-sub { justify-self: center; background: rgba(10, 12, 18, 0.82); padding: 8px 16px; border-radius: 999px; text-shadow: none; }
 
 /* ---------- controls card ---------- */

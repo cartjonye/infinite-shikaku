@@ -33,7 +33,7 @@ Each mode has its own save, so the menu offers **Continue** or **New game** per 
 - The clock runs only for the zone the player last acted in, while that zone is on screen, the zoom is playable, the tab is visible and nothing is paused.
 - Below 9 px per cell (where clue numbers are hidden) the board is not playable: the clock pauses and every drag pans.
 - Input that doesn't touch a number does nothing. A drag over exactly one number with the right area places a rectangle; a drag over a number with the wrong area (or over several numbers) shows as a short red flash that fades in a second and replaces nothing. Tapping a number removes its rectangle (with Undo) or fills a 1; taps elsewhere do nothing. Taps right after a pan, pinch or glide, and long presses, are ignored.
-- Every start or resume, in every mode, plays a 3, 2, 1, Go countdown with the board locked and all clocks frozen. First-time players see a "Getting around" controls card first (replayable from How to play).
+- Every start or resume, in every mode, plays a 3, 2, 1, Go countdown with the board locked and all clocks frozen. First-time players see a "Getting around" controls card first (draw, undo by tapping a number, move, zoom; replayable from How to play). Confirmations use an in-game dialog, never the browser's.
 - The start zone has a gold outline and house badge; the Home button (H) glides back to it and points towards it while it is off screen.
 
 ## Puzzle guarantees
