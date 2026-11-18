@@ -9,7 +9,7 @@ import type { SaveData } from './storage';
 export type RunStyle = 'timeattack' | 'survival';
 
 export const TA_MINUTES = [2, 5, 10];
-export const SURVIVAL_START_MS = 30_000;
+export const SURVIVAL_START_MS = 90_000;
 
 /**
  * Relative value of each grid size, scaled to its typical number of pieces

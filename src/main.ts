@@ -15,7 +15,7 @@ import {
 } from './layouts';
 import { MIN_PLAY_ZOOM, Renderer, type Camera, type Preview } from './render';
 import { clearSave, freshSave, loadSave, sanitize, summarize, writeSave, type SaveData } from './storage';
-import type { Rect } from './types';
+import { rectContains, rectsOverlap, type Rect } from './types';
 import {
   TA_MINUTES,
   clearSurvival,
@@ -28,6 +28,7 @@ import {
   savePrefs,
   submitRecord,
   survivalBonusMs,
+  SURVIVAL_START_MS,
   writeSurvival,
   type RunState,
   type RunStyle,
@@ -44,7 +45,9 @@ const renderer = new Renderer(canvas);
 let inGame = false;
 /** the Time Attack or Survival run in progress (null in Endless) */
 let run: RunState | null = null;
-let runPhase: 'countdown' | 'live' | 'over' | null = null;
+let runPhase: 'live' | 'over' | null = null;
+/** true while "3, 2, 1, Go" plays: the board is locked and every clock is frozen */
+let countdownActive = false;
 let layout: WorldLayout = createClassicLayout();
 let save: SaveData = { ...freshSave('classic'), seed: 20261116 };
 let world = new World(layout, save);
@@ -85,7 +88,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) saveNow();
   lastTick = performance.now();
   // coming back to a live run: give the player a moment before the clock moves again
-  if (!document.hidden && run && runPhase === 'live' && !anyModalOpen()) startCountdown('Welcome back');
+  if (!document.hidden && inGame && runPhase !== 'over' && !anyModalOpen()) startCountdown('Welcome back');
 });
 window.addEventListener('pagehide', saveNow);
 
@@ -158,7 +161,7 @@ function onScreen(z: Zone) {
 const playableZoom = () => cam.zoom >= MIN_PLAY_ZOOM;
 /** True while the active zone's clock is counting. */
 function timerRunning(): Zone | null {
-  if (run) return null; // runs use one shared clock instead
+  if (run || countdownActive) return null; // runs use one shared clock; nothing runs during the countdown
   if (!inGame || document.hidden || anyModalOpen() || !playableZoom()) return null;
   const z = activeZone();
   return z && z.key in save.timers && onScreen(z) ? z : null;
@@ -205,7 +208,7 @@ function startPinch() {
 }
 
 canvas.addEventListener('pointerdown', (e) => {
-  if (!inGame || (run && runPhase !== 'live')) return;
+  if (!inGame || countdownActive || runPhase === 'over') return;
   canvas.setPointerCapture(e.pointerId);
   const p = localPos(e);
   ptrs.set(e.pointerId, p);
@@ -280,42 +283,53 @@ function endPointer(e: PointerEvent, cancelled: boolean) {
     const z = mode.zone;
     const k = z.key;
     const p = zones.get(z)!;
-    const { r0, c0 } = mode;
     const rect = preview.rect;
-    const isOneClue = (r: number, c: number) => p.clues.some((q) => q.r === r && q.c === c && q.v === 1);
     let acted = false;
-    if (!mode.moved) {
-      // a tap: ignored right after a gesture and when held too long (likely accidental)
-      const deliberate = now - lastGestureAt > TAP_GUARD_MS && now - mode.t0 < LONG_PRESS_MS;
-      if (deliberate) {
-        const gone = world.removeAt(k, r0, c0);
-        if (gone) {
-          acted = true;
-          toast('Rectangle removed', {
-            action: {
-              label: 'Undo',
-              run: () => {
-                if (world.status(z) !== 'open') return;
-                world.place(k, gone);
-                afterMove(z);
+    if (!mode.moved || rect.w * rect.h === 1) {
+      // A tap (or a drag inside one cell) only does something on a number:
+      // remove the rectangle covering it, clear the red attempt, or fill a 1.
+      const deliberate = mode.moved || (now - lastGestureAt > TAP_GUARD_MS && now - mode.t0 < LONG_PRESS_MS);
+      const clue = p.clues.find((q) => q.r === rect.r && q.c === rect.c);
+      if (deliberate && clue) {
+        const f = world.failed;
+        if (f && f.zone === z && rectContains(f.rect, clue.r, clue.c)) {
+          world.failed = null;
+          dirty = true;
+        } else {
+          const gone = world.removeAt(k, clue.r, clue.c);
+          if (gone) {
+            acted = true;
+            toast('Rectangle removed', {
+              action: {
+                label: 'Undo',
+                run: () => {
+                  if (world.status(z) !== 'open') return;
+                  world.place(k, gone);
+                  afterMove(z);
+                },
               },
-            },
-          });
-        } else if (isOneClue(r0, c0)) {
-          world.place(k, { r: r0, c: c0, w: 1, h: 1 });
-          acted = true;
+            });
+          } else if (clue.v === 1) {
+            world.place(k, { r: clue.r, c: clue.c, w: 1, h: 1 });
+            acted = true;
+          }
         }
       }
-    } else if (rect.w * rect.h > 1) {
-      world.place(k, rect);
-      acted = true;
-      // the clock starts with the first rectangle the player draws
-      if (!(k in save.timers)) save.timers[k] = 0;
-    } else if (isOneClue(rect.r, rect.c)) {
-      world.place(k, rect);
-      acted = true;
+    } else {
+      const kind = World.classify(p, rect);
+      if (kind === 'ok') {
+        world.place(k, rect);
+        const f = world.failed;
+        if (f && f.zone === z && rectsOverlap(f.rect, rect)) world.failed = null;
+        acted = true;
+      } else if (kind === 'fail') {
+        // keep the wrong attempt visible, without touching any placed rectangle
+        world.failed = { zone: z, rect: { ...rect } };
+        acted = true;
+      }
+      // a drag that touches no number does nothing at all
+      if (acted && !(k in save.timers)) save.timers[k] = 0; // the clock starts with the first real attempt
     }
-    // a drag that ends on a single ordinary cell places nothing
     if (acted) afterMove(z);
   }
   if (mode.kind === 'pan') {
@@ -369,7 +383,7 @@ canvas.addEventListener(
 );
 
 window.addEventListener('keydown', (e) => {
-  if (!inGame || runPhase === 'over' || runPhase === 'countdown') return;
+  if (!inGame || runPhase === 'over' || countdownActive) return;
   if (e.key === 'Escape' || e.key === 'p') {
     if (anyModalOpen()) closeModals();
     else openPause();
@@ -571,7 +585,7 @@ function updateHud() {
     // one shared countdown for the whole run
     timerEl.textContent = clock(run.clockMs);
     timerEl.classList.remove('idle');
-    timerEl.classList.toggle('low', runPhase === 'live' && run.clockMs < 10_000);
+    timerEl.classList.toggle('low', runPhase === 'live' && !countdownActive && run.clockMs < 10_000);
     setHtml(runPillsEl, pills([[area(run.area), 'gold'], zonesText(run.zones)]));
     solvedCount.textContent = String(run.zones);
   } else timerEl.classList.remove('low');
@@ -596,21 +610,103 @@ const helpModal = $('#help-modal');
 const sizeModal = $('#size-modal');
 const runPauseModal = $('#run-pause-modal');
 const resultsModal = $('#results-modal');
+const coachModal = $('#coach-modal');
+
+// ---------- controls card (shown once, replayable from How to play) ----------
+const COACH_KEY = 'infinite-shikaku:coach:v1';
+function coachSeen() {
+  try {
+    return localStorage.getItem(COACH_KEY) === '1';
+  } catch {
+    return true;
+  }
+}
+const touchFirst = () => window.matchMedia?.('(pointer: coarse)').matches ?? false;
+function coachArt(kind: 'draw' | 'pan' | 'zoom', touch: boolean): string {
+  const cells = (cols: number, rows: number, x0: number, y0: number, size: number, gap: number, num?: [number, number, string]) => {
+    let out = '';
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++)
+        out += `<rect x="${x0 + c * (size + gap)}" y="${y0 + r * (size + gap)}" width="${size}" height="${size}" rx="4" class="cc-cell"/>`;
+    if (num) out += `<text x="${x0 + num[0] * (size + gap) + size / 2}" y="${y0 + num[1] * (size + gap) + size / 2 + 5}" class="cc-num">${num[2]}</text>`;
+    return out;
+  };
+  const finger = (cls: string, x: number, y: number) => `<g class="${cls}"><circle cx="${x}" cy="${y}" r="9" class="cc-finger"/></g>`;
+  const cursor = (cls: string, x: number, y: number) =>
+    `<g class="${cls}"><path d="M${x} ${y}l0 17 4.5-4.2 3.3 7.2 3-1.4-3.2-7 6.2-.4z" class="cc-cursor"/></g>`;
+  if (kind === 'draw') {
+    const pointer = touch ? finger('cc-draw-move', 34, 21) : cursor('cc-draw-move', 32, 18);
+    return `<svg viewBox="0 0 120 90" aria-hidden="true">${cells(3, 3, 24, 11, 20, 4, [0, 0, '4'])}<rect x="24" y="11" width="44" height="44" rx="5" class="cc-rect cc-draw-grow"/>${pointer}</svg>`;
+  }
+  if (kind === 'pan') {
+    const pointers = touch ? finger('cc-pan-move', 50, 46) + finger('cc-pan-move', 72, 46) : cursor('cc-pan-move', 56, 40);
+    return `<svg viewBox="0 0 120 90" aria-hidden="true"><g class="cc-pan-move">${cells(5, 4, 4, 2, 20, 4, [2, 1, '6'])}</g>${pointers}</svg>`;
+  }
+  const pointers = touch
+    ? finger('cc-zoom-a', 50, 50) + finger('cc-zoom-b', 70, 40)
+    : `<g><rect x="50" y="30" width="20" height="32" rx="10" class="cc-mouse"/><line x1="60" y1="35" x2="60" y2="43" class="cc-wheel"/></g>`;
+  return `<svg viewBox="0 0 120 90" aria-hidden="true"><g class="cc-zoom-grow">${cells(3, 3, 24, 9, 20, 4, [0, 0, '9'])}</g>${pointers}</svg>`;
+}
+function renderCoach() {
+  const touch = touchFirst();
+  const items: [string, 'draw' | 'pan' | 'zoom', string][] = [
+    ['Draw', 'draw', 'Drag across a number to draw'],
+    ['Move', 'pan', touch ? 'Two fingers to move around' : 'Drag empty ground to move around'],
+    ['Zoom', 'zoom', touch ? 'Pinch to zoom' : 'Scroll to zoom'],
+  ];
+  $('#coach-items').innerHTML = items
+    .map(([title, kind, caption]) => `<div class="coach-item">${coachArt(kind, touch)}<div class="coach-title">${title}</div><div class="coach-cap">${caption}</div></div>`)
+    .join('');
+}
+function openCoach() {
+  renderCoach();
+  coachModal.hidden = false;
+}
+$('#btn-coach-ok').addEventListener('click', () => {
+  try {
+    localStorage.setItem(COACH_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+  closeModals();
+});
+$('#btn-show-controls').addEventListener('click', () => {
+  helpModal.hidden = true;
+  openCoach();
+});
 function anyModalOpen() {
-  return !pauseModal.hidden || !helpModal.hidden || !sizeModal.hidden || !runPauseModal.hidden || !resultsModal.hidden;
+  return (
+    !pauseModal.hidden ||
+    !helpModal.hidden ||
+    !sizeModal.hidden ||
+    !runPauseModal.hidden ||
+    !resultsModal.hidden ||
+    !coachModal.hidden
+  );
 }
 function closeModals() {
-  const wasOpen = !pauseModal.hidden || !helpModal.hidden || !runPauseModal.hidden;
+  const wasOpen = !pauseModal.hidden || !helpModal.hidden || !runPauseModal.hidden || !coachModal.hidden;
   pauseModal.hidden = true;
   helpModal.hidden = true;
   sizeModal.hidden = true;
   runPauseModal.hidden = true;
+  coachModal.hidden = true;
   if (inGame && !save.seenHelp) {
     save.seenHelp = true;
     scheduleSave();
   }
-  // back to a live run: count the player in again
-  if (wasOpen && run && runPhase === 'live') startCountdown('Get ready');
+  // back to the board: first-timers see the controls, then everyone is counted in
+  if (wasOpen && inGame && runPhase !== 'over') readyUp();
+}
+
+/** Before play (re)starts: show the controls card once, then "3, 2, 1, Go". */
+let nextCountdownSub = 'Get ready';
+function readyUp(sub?: string) {
+  if (sub) nextCountdownSub = sub;
+  if (!coachSeen()) return openCoach();
+  const msg = nextCountdownSub;
+  nextCountdownSub = 'Get ready';
+  startCountdown(msg);
 }
 const MODE_NAMES: Record<ModeId, string> = { classic: 'Classic', fixed: 'Fixed', mosaic: 'Mosaic' };
 const STYLE_NAMES: Record<RunStyle, string> = { timeattack: 'Time Attack', survival: 'Survival' };
@@ -649,7 +745,7 @@ const statGrid = (rows: [string, string][]) =>
   rows.map(([k, v]) => `<div class="stat"><div class="stat-v">${esc(v)}</div><div class="stat-k">${esc(k)}</div></div>`).join('');
 
 function openPause() {
-  if (!inGame || runPhase === 'over' || runPhase === 'countdown') return;
+  if (!inGame || runPhase === 'over' || countdownActive) return;
   if (run) return openRunPause();
   renderStats();
   pauseModal.hidden = false;
@@ -738,12 +834,17 @@ async function startSession(d: SaveData) {
   menuEl.hidden = true;
   $('#help-mode').innerHTML = HELP_MODE[d.mode];
   saveNow();
-  if (!save.seenHelp) helpModal.hidden = false;
   updateHud();
+  // first visit: How to play, then the controls card, then the countdown
+  if (!save.seenHelp) {
+    nextCountdownSub = 'Go explore';
+    helpModal.hidden = false;
+  } else readyUp(d.solved.length ? 'Welcome back' : 'Go explore');
 }
 
 function endSession() {
   saveNow();
+  inGame = false; // first, so closing the pause sheet doesn't start a countdown
   closeModals();
   resultsModal.hidden = true;
   stopCountdown();
@@ -771,12 +872,13 @@ let countdownTimer: number | undefined;
 function stopCountdown() {
   window.clearTimeout(countdownTimer);
   countdownEl.hidden = true;
+  countdownActive = false;
 }
 /** "3, 2, 1, Go" with the board visible but locked, then the run clock starts. */
 function startCountdown(sub: string) {
-  if (!run) return;
+  if (!inGame) return;
   stopCountdown();
-  runPhase = 'countdown';
+  countdownActive = true;
   preview = null;
   mode = { kind: 'none' };
   ptrs.clear();
@@ -788,7 +890,6 @@ function startCountdown(sub: string) {
   const step = () => {
     if (n < 0) {
       stopCountdown();
-      runPhase = 'live';
       lastTick = performance.now();
       return;
     }
@@ -821,14 +922,15 @@ async function startRun(r: RunState, resume?: SaveData) {
   document.body.classList.add('in-game', 'in-run');
   menuEl.hidden = true;
   $('#help-mode').innerHTML = HELP_RUN[r.style] + HELP_MODE[r.world];
+  runPhase = 'live';
   saveNow();
   updateHud();
-  startCountdown(
+  readyUp(
     resume
       ? 'Welcome back'
       : r.style === 'timeattack'
         ? `Clear all you can in ${r.minutes} minutes`
-        : 'Every Shikaku buys you time',
+        : `You have ${SURVIVAL_START_MS / 1000} seconds. Every Shikaku buys you more`,
   );
 }
 
@@ -897,6 +999,7 @@ function endRun() {
   if (!run) return;
   run.clockMs = 0;
   runPhase = 'over';
+  stopCountdown();
   preview = null;
   mode = { kind: 'none' };
   const key = recordKey(run.style, run.world, run.tileSize, run.minutes);
@@ -1130,7 +1233,7 @@ function frame(now: number) {
   const dt = Math.min(1000, now - lastTick);
   lastTick = now;
   if (inGame && run) {
-    if (runPhase === 'live' && !document.hidden && !anyModalOpen()) {
+    if (runPhase === 'live' && !countdownActive && !document.hidden && !anyModalOpen()) {
       run.clockMs -= dt;
       run.elapsedMs += dt;
       if (run.style === 'survival') {
@@ -1142,7 +1245,7 @@ function frame(now: number) {
       }
       if (run.clockMs <= 0) endRun();
     }
-  } else if (inGame && !document.hidden && !anyModalOpen()) {
+  } else if (inGame && !countdownActive && !document.hidden && !anyModalOpen()) {
     save.stats.totalPlayMs += dt;
     const z = timerRunning();
     if (z) save.timers[z.key] += dt;
@@ -1210,6 +1313,7 @@ const zoneOf = (key: string) => zoneByKey(layout, key) ?? layout.origin;
   },
   zoneAt: (x: number, y: number) => layout.zoneAtCell(x, y),
   solution: (key: string) => zones.getNow(zoneOf(key)).solution,
+  clues: (key: string) => zones.getNow(zoneOf(key)).clues,
   toScreen: (wx: number, wy: number) => {
     const b = canvas.getBoundingClientRect();
     const [x, y] = renderer.toScreen(cam, wx, wy);
@@ -1227,9 +1331,19 @@ const zoneOf = (key: string) => zoneByKey(layout, key) ?? layout.origin;
   get runPhase() {
     return runPhase;
   },
-  skipCountdown: () => {
-    stopCountdown();
-    if (run) runPhase = 'live';
+  get countdown() {
+    return countdownActive;
+  },
+  skipCountdown: () => stopCountdown(),
+  get failed() {
+    return world.failed ? { zone: world.failed.zone.key, ...world.failed.rect } : null;
+  },
+  dismissCoach: () => {
+    try {
+      localStorage.setItem('infinite-shikaku:coach:v1', '1');
+    } catch {
+      /* ignore */
+    }
   },
   /** test helper: take time off the run clock */
   fastForward: (ms: number) => {

@@ -54,9 +54,9 @@ describe('runs', () => {
     expect(creditSolve(ta, 8)).toBe(0);
     expect(ta.area).toBe(64);
     const sv = newRun('survival', 'fixed', 10);
-    expect(sv.clockMs).toBe(30_000);
+    expect(sv.clockMs).toBe(90_000);
     expect(creditSolve(sv, 10)).toBe(66_000);
-    expect(sv.clockMs).toBe(96_000);
+    expect(sv.clockMs).toBe(156_000);
     expect(sv.bySize).toEqual({ 10: 1 });
   });
 
@@ -93,7 +93,7 @@ describe('runs', () => {
     const run = newRun('survival', 'fixed', 8);
     const save = freshSave('fixed', 8);
     writeSurvival(save, run);
-    expect(loadSurvival('fixed', 8)!.run.clockMs).toBe(30_000);
+    expect(loadSurvival('fixed', 8)!.run.clockMs).toBe(90_000);
     expect(loadSurvival('fixed', 10)).toBeNull();
     clearSurvival('fixed', 8);
     expect(loadSurvival('fixed', 8)).toBeNull();

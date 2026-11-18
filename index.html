@@ -64,7 +64,10 @@
         <p class="muted">Your clock starts with your first rectangle and pauses whenever you look away or zoom out. Stuck? Tap <b>Easier</b> for a smaller Shikaku nearby.</p>
         <p class="muted">The gold house marks where you started; the house button takes you back. Zoom with + / − or fit the view with ⤢.</p>
         <p class="muted">Drag on empty space to pan. Pinch or scroll to zoom. Pause (Esc) shows your stats. Progress saves automatically on this device, separately for each mode.</p>
-        <button class="primary" data-close>Let's go</button>
+        <div class="stack">
+          <button class="primary" data-close>Let's go</button>
+          <button id="btn-show-controls" class="secondary">Show controls</button>
+        </div>
       </div>
     </div>
 
@@ -120,6 +123,14 @@
           <button id="btn-again" class="primary">Play again</button>
           <button id="btn-results-menu" class="secondary">Menu</button>
         </div>
+      </div>
+    </div>
+
+    <div id="coach-modal" class="modal coach-modal" hidden>
+      <div class="sheet coach">
+        <h2>Getting around</h2>
+        <div id="coach-items" class="coach-items"></div>
+        <button id="btn-coach-ok" class="primary">Got it</button>
       </div>
     </div>
 

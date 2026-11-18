@@ -259,3 +259,28 @@ describe('World bookkeeping', () => {
     expect(w.shownRects(n, fake)).toBe(fake.solution);
   });
 });
+
+describe('drawing rules', () => {
+  const p = {
+    size: 4,
+    clues: [
+      { r: 0, c: 0, v: 4 },
+      { r: 0, c: 3, v: 4 },
+      { r: 3, c: 0, v: 8 },
+    ],
+    solution: [],
+    needsSearch: false,
+  };
+  it('ignores rectangles that touch no number', () => {
+    expect(World.classify(p, { r: 1, c: 1, w: 2, h: 2 })).toBe('none');
+  });
+  it('accepts exactly one number with a matching area', () => {
+    expect(World.classify(p, { r: 0, c: 0, w: 2, h: 2 })).toBe('ok');
+    expect(World.classify(p, { r: 2, c: 0, w: 4, h: 2 })).toBe('ok');
+  });
+  it('fails on a wrong area or several numbers', () => {
+    expect(World.classify(p, { r: 0, c: 0, w: 3, h: 1 })).toBe('fail');
+    expect(World.classify(p, { r: 0, c: 0, w: 4, h: 1 })).toBe('fail');
+  });
+});
+

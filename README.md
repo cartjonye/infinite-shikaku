@@ -8,7 +8,7 @@ The main menu offers three play styles:
 
 - **Endless**: the three worlds below, each with its own save (Continue or New).
 - **Time Attack**: clear as much area as possible in 2, 5 or 10 minutes, in a fresh world of your choice. Not saved; personal bests are kept per world and length.
-- **Survival**: start with 30 seconds; every solved zone adds time. Each grid size has a weight (6×6 10, 8×8 15, 10×10 22, 12×12 28, 15×15 40, 16×16 44, 18×18 52, 20×20 61, 24×24 80, scaled to its typical number of pieces). The bonus is `round(base × weight / 10)` seconds, where `base` (the 6×6 bonus) is 30 s for the first three zones, then drops 1 s every three zones down to a floor of 6 s from the 73rd zone. Because it shrinks per zone, big grids are worth most early in a run. A run in progress is saved per world and resumes after a 3, 2, 1 countdown; personal bests rank by time survived.
+- **Survival**: start with 90 seconds; every solved zone adds time. Each grid size has a weight (6×6 10, 8×8 15, 10×10 22, 12×12 28, 15×15 40, 16×16 44, 18×18 52, 20×20 61, 24×24 80, scaled to its typical number of pieces). The bonus is `round(base × weight / 10)` seconds, where `base` (the 6×6 bonus) is 30 s for the first three zones, then drops 1 s every three zones down to a floor of 6 s from the 73rd zone. Because it shrinks per zone, big grids are worth most early in a run. A run in progress is saved per world and resumes after a 3, 2, 1 countdown; personal bests rank by time survived.
 
 Run logic lives in `src/runs.ts`.
 
@@ -32,7 +32,8 @@ Each mode has its own save, so the menu offers **Continue** or **New game** per 
 - A zone's clock starts with the first rectangle the player drags in it. Looking at a zone or tapping never starts it.
 - The clock runs only for the zone the player last acted in, while that zone is on screen, the zoom is playable, the tab is visible and nothing is paused.
 - Below 9 px per cell (where clue numbers are hidden) the board is not playable: the clock pauses and every drag pans.
-- Accidental input is filtered: single-cell drags place nothing, taps right after a pan, pinch or glide are ignored, long presses are ignored, and removing a rectangle offers Undo.
+- Input that doesn't touch a number does nothing. A drag over exactly one number with the right area places a rectangle; a drag over a number with the wrong area (or over several numbers) shows as a single red ✕ attempt that replaces nothing. Tapping a number removes its rectangle (with Undo) or fills a 1; taps elsewhere do nothing. Taps right after a pan, pinch or glide, and long presses, are ignored.
+- Every start or resume, in every mode, plays a 3, 2, 1, Go countdown with the board locked and all clocks frozen. First-time players see a "Getting around" controls card first (replayable from How to play).
 - The start zone has a gold outline and house badge; the Home button (H) glides back to it and points towards it while it is off screen.
 
 ## Puzzle guarantees

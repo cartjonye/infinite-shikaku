@@ -34,6 +34,8 @@ export const sideScore = (s: SideState) =>
 export class World {
   solved: Set<string>;
   solvedAt = new Map<string, number>();
+  /** the one wrong attempt shown on the board (red with an ✕); never part of a solution */
+  failed: { zone: Zone; rect: Rect } | null = null;
   /** every unlocked, unsolved zone; kept up to date incrementally on each solve */
   private open = new Map<string, Zone>();
 
@@ -191,6 +193,23 @@ export class World {
     return gone;
   }
 
+  /**
+   * What a drawn rectangle would do:
+   * 'none' when it covers no number (ignored), 'ok' when it covers exactly one number
+   * with a matching area, 'fail' otherwise (wrong area, or several numbers).
+   */
+  static classify(p: Puzzle, q: Rect): 'none' | 'ok' | 'fail' {
+    let n = 0;
+    let v = 0;
+    for (const k of p.clues) {
+      if (!rectContains(q, k.r, k.c)) continue;
+      n++;
+      v = k.v;
+    }
+    if (n === 0) return 'none';
+    return n === 1 && v === rectArea(q) ? 'ok' : 'fail';
+  }
+
   /** Index of the single clue a rect satisfies, or -1. */
   static matchClue(p: Puzzle, q: Rect): number {
     let found = -1;
@@ -224,6 +243,7 @@ export class World {
       this.save.custom[z.key] = mine.map((q) => ({ ...q }));
     }
     this.solved.add(z.key);
+    if (this.failed?.zone === z) this.failed = null;
     this.save.solved.push(z.key);
     this.open.delete(z.key);
     this.solvedAt.set(z.key, performance.now());

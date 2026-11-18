@@ -52,6 +52,7 @@ export class Renderer {
     accent: '#ffcf6e',
     invalid: '#5b6175',
     ok: '#8ee0a8',
+    bad: '#ff6b6b',
   };
 
   constructor(public canvas: HTMLCanvasElement) {
@@ -265,20 +266,46 @@ export class Renderer {
 
     this.homeBadge(cam, world, now);
 
-    // drag preview
+    // the one failed attempt: red with an X
+    const failed = world.failed;
+    if (failed && world.status(failed.zone) === 'open') {
+      const zg = zoneGap / 2;
+      const b = this.box(cam, failed.zone, failed.rect, { l: zg, r: zg, t: zg, b: zg });
+      this.failMark(b, rad, s);
+    }
+
+    // drag preview: green = will place, red X = wrong, grey = touches no number
     if (preview) {
       const p = zones.get(preview.zone);
       const zg = zoneGap / 2;
       const b = this.box(cam, preview.zone, preview.rect, { l: zg, r: zg, t: zg, b: zg });
-      const ok = p ? World.matchClue(p, preview.rect) >= 0 : false;
-      c.fillStyle = ok ? 'rgba(142,224,168,0.45)' : 'rgba(255,255,255,0.22)';
-      this.rr(b.x, b.y, b.w, b.h, rad);
-      c.fill();
-      c.strokeStyle = ok ? this.colors.ok : 'rgba(255,255,255,0.7)';
-      c.lineWidth = Math.max(1.5, s * 0.06);
-      c.stroke();
+      const kind = p ? World.classify(p, preview.rect) : 'none';
       const area = preview.rect.w * preview.rect.h;
-      const label = `${preview.rect.w}×${preview.rect.h} = ${area}`;
+      let label = `${preview.rect.w}×${preview.rect.h} = ${area}`;
+      let color = this.colors.text;
+      if (kind === 'ok') {
+        color = this.colors.ok;
+        c.fillStyle = 'rgba(142,224,168,0.45)';
+        this.rr(b.x, b.y, b.w, b.h, rad);
+        c.fill();
+        c.strokeStyle = this.colors.ok;
+        c.lineWidth = Math.max(1.5, s * 0.06);
+        c.stroke();
+      } else if (kind === 'fail') {
+        color = this.colors.bad;
+        this.failMark(b, rad, s);
+      } else {
+        label = 'No number';
+        color = this.colors.textDim;
+        c.fillStyle = 'rgba(255,255,255,0.08)';
+        this.rr(b.x, b.y, b.w, b.h, rad);
+        c.fill();
+        c.strokeStyle = 'rgba(255,255,255,0.35)';
+        c.setLineDash([s * 0.15, s * 0.12]);
+        c.lineWidth = Math.max(1.2, s * 0.04);
+        c.stroke();
+        c.setLineDash([]);
+      }
       const fs = Math.max(12, Math.min(22, s * 0.42));
       c.font = `700 ${fs}px ui-rounded, system-ui, sans-serif`;
       const tw = c.measureText(label).width + fs;
@@ -287,7 +314,7 @@ export class Renderer {
       c.fillStyle = 'rgba(10,12,18,0.85)';
       this.rr(lx - tw / 2, ly - fs * 0.75, tw, fs * 1.5, fs * 0.5);
       c.fill();
-      c.fillStyle = ok ? this.colors.ok : this.colors.text;
+      c.fillStyle = color;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
       c.fillText(label, lx, ly);
@@ -449,6 +476,28 @@ export class Renderer {
       c.closePath();
       c.fill();
     });
+  }
+
+  /** A wrong rectangle: translucent red with a red outline and an X corner to corner. */
+  private failMark(b: { x: number; y: number; w: number; h: number }, rad: number, s: number) {
+    const c = this.ctx;
+    c.fillStyle = 'rgba(255,107,107,0.22)';
+    this.rr(b.x, b.y, b.w, b.h, rad);
+    c.fill();
+    c.strokeStyle = this.colors.bad;
+    c.lineWidth = Math.max(1.5, s * 0.07);
+    c.stroke();
+    const inset = Math.min(b.w, b.h) * 0.18 + rad * 0.3;
+    // the X stays light so the numbers underneath remain readable
+    c.strokeStyle = 'rgba(255,107,107,0.55)';
+    c.lineWidth = Math.max(2, s * 0.08);
+    c.lineCap = 'round';
+    c.beginPath();
+    c.moveTo(b.x + inset, b.y + inset);
+    c.lineTo(b.x + b.w - inset, b.y + b.h - inset);
+    c.moveTo(b.x + b.w - inset, b.y + inset);
+    c.lineTo(b.x + inset, b.y + b.h - inset);
+    c.stroke();
   }
 
   private lock(x: number, y: number, size: number) {
