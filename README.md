@@ -8,7 +8,7 @@ The main menu offers three play styles:
 
 - **Endless**: the three worlds below, each with its own save (Continue or New).
 - **Time Attack**: clear as much area as possible in 2, 5 or 10 minutes, in a fresh world of your choice. Not saved; personal bests are kept per world and length.
-- **Survival**: start with 90 seconds; every solved zone adds time. Each grid size has a weight (6×6 10, 8×8 15, 10×10 22, 12×12 28, 15×15 40, 16×16 44, 18×18 52, 20×20 61, 24×24 80, scaled to its typical number of pieces). The bonus is `round(base × weight / 10)` seconds, where `base` (the 6×6 bonus) is 30 s for the first three zones, then drops 1 s every three zones down to a floor of 6 s from the 73rd zone. Because it shrinks per zone, big grids are worth most early in a run. A run in progress is saved per world and resumes after a 3, 2, 1 countdown; personal bests rank by time survived.
+- **Survival**: start with 90 seconds; every solved zone adds time. Each grid size has a weight (6×6 10, 8×8 15, 10×10 22, 12×12 28, 15×15 40, 16×16 44, 18×18 52, 20×20 61, 24×24 80, scaled to its typical number of pieces). The bonus is `round(base × weight / 10)` seconds, where `base` (the 6×6 bonus) is 30 s for the first three zones, then drops 1 s every three zones down to a floor of 6 s from the 73rd zone. Because it shrinks per zone, big grids are worth most early in a run. A run in progress is saved per world and resumes after a 3, 2, 1 countdown. The pause screen also offers Surrender, which ends the run on the spot with the time survived counted; personal bests rank by time survived.
 
 Run logic lives in `src/runs.ts`.
 

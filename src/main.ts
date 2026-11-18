@@ -988,10 +988,11 @@ function openRunPause() {
   ];
   $('#run-pause-stats').innerHTML = statGrid(rows);
   $('#btn-run-quit').textContent = run.style === 'survival' ? 'Save and quit' : 'Quit';
+  $('#btn-run-surrender').hidden = run.style !== 'survival';
   runPauseModal.hidden = false;
 }
 
-function endRun() {
+function endRun(surrendered = false) {
   if (!run) return;
   run.clockMs = 0;
   runPhase = 'over';
@@ -1003,13 +1004,13 @@ function endRun() {
   const isBest = submitRecord(run);
   if (run.style === 'survival') clearSurvival(run.world, run.tileSize);
   closeModals();
-  showResults(run, isBest, previous);
+  showResults(run, isBest, previous, surrendered);
   updateHud();
 }
 
-function showResults(r: RunState, isBest: boolean, previous: ReturnType<typeof getRecord>) {
+function showResults(r: RunState, isBest: boolean, previous: ReturnType<typeof getRecord>, surrendered = false) {
   $('#results-badge').hidden = !isBest;
-  $('#results-kicker').innerHTML = pills(runPills(r));
+  $('#results-kicker').innerHTML = pills([...runPills(r), ...(surrendered ? [['Surrendered', 'dim'] as [string, string]] : [])]);
   $('#results-kicker').className = 'results-kicker pill-row results-pills';
   const sizes = Object.keys(r.bySize).map(Number).sort((a, b) => a - b);
   const items: (string | [string, string])[] = [];
@@ -1046,6 +1047,12 @@ $('#btn-run-quit').addEventListener('click', () => {
   if (!run) return;
   if (run.style === 'timeattack' && !confirm('Leave this run? It will not count.')) return;
   endSession();
+});
+$('#btn-run-surrender').addEventListener('click', () => {
+  if (!run || run.style !== 'survival') return;
+  if (!confirm('Surrender this run? The time you survived still counts.')) return;
+  runPauseModal.hidden = true;
+  endRun(true);
 });
 $('#btn-again').addEventListener('click', () => {
   if (!run) return;

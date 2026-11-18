@@ -523,6 +523,8 @@ body.in-run #timer { font-size: 34px; }
 /* paused runs hide the board so the pause can't be used to plan ahead */
 body.in-run .modal { backdrop-filter: blur(18px); background: rgba(6, 7, 11, 0.86); }
 .mode-list[hidden] { display: none; }
+.surrender { color: #ff8a7a; border-color: rgba(255, 138, 122, 0.35); }
+.surrender[hidden] { display: none; }
 .countdown-sub { justify-self: center; background: rgba(10, 12, 18, 0.82); padding: 8px 16px; border-radius: 999px; text-shadow: none; }
 
 /* ---------- controls card ---------- */
