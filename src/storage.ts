@@ -2,7 +2,7 @@
  * localStorage persistence, one save per game mode.
  * Every access is guarded so the game still runs (without saving) when storage is unavailable.
  */
-import { zoneByKey, type ModeId, type WorldLayout } from './layouts';
+import { zoneByKey, type Difficulty, type ModeId, type WorldLayout } from './layouts';
 import type { Rect } from './types';
 
 export const SAVE_VERSION = 4;
@@ -10,6 +10,7 @@ const KEYS: Record<ModeId, string> = {
   classic: 'infinite-shikaku:classic:v4',
   fixed: 'infinite-shikaku:fixed:v2',
   mosaic: 'infinite-shikaku:mosaic:v2',
+  singles: 'infinite-shikaku:singles:v1',
 };
 const LAST_MODE_KEY = 'infinite-shikaku:last-mode';
 // Saves made before the puzzle generator changed no longer match their worlds.
@@ -45,6 +46,8 @@ export interface SaveData {
   mode: ModeId;
   /** Fixed mode only: the chosen tile size */
   tileSize?: number;
+  /** Singles only: the chosen difficulty */
+  difficulty?: Difficulty;
   seed: number;
   solved: string[];
   /** in-progress rectangles per zone key */
@@ -74,11 +77,12 @@ export const emptyStats = (): Stats => ({
   totalPlayMs: 0,
 });
 
-export function freshSave(mode: ModeId, tileSize?: number): SaveData {
+export function freshSave(mode: ModeId, tileSize?: number, difficulty?: Difficulty): SaveData {
   return {
     v: SAVE_VERSION,
     mode,
-    tileSize,
+    tileSize: mode === 'fixed' ? tileSize : undefined,
+    difficulty: mode === 'singles' ? (difficulty ?? 'easy') : undefined,
     seed: (Math.random() * 2 ** 32) >>> 0,
     solved: [],
     rects: {},
@@ -120,7 +124,8 @@ function isValid(d: any, mode: ModeId): boolean {
     typeof d.rects === 'object' &&
     typeof d.timers === 'object' &&
     typeof d.stats === 'object' &&
-    (mode !== 'fixed' || typeof d.tileSize === 'number')
+    (mode !== 'fixed' || typeof d.tileSize === 'number') &&
+    (mode !== 'singles' || typeof d.difficulty === 'string')
   );
 }
 
@@ -164,7 +169,7 @@ export function clearSave(mode: ModeId) {
 export function lastMode(): ModeId | null {
   try {
     const m = localStorage.getItem(LAST_MODE_KEY);
-    return m === 'classic' || m === 'fixed' || m === 'mosaic' ? m : null;
+    return m === 'classic' || m === 'fixed' || m === 'mosaic' || m === 'singles' ? m : null;
   } catch {
     return null;
   }
@@ -177,6 +182,7 @@ export interface SaveSummary {
   totalPlayMs: number;
   lastPlayed: number;
   tileSize?: number;
+  difficulty?: Difficulty;
 }
 
 export function summarize(mode: ModeId): SaveSummary | null {
@@ -189,5 +195,6 @@ export function summarize(mode: ModeId): SaveSummary | null {
     totalPlayMs: d.stats.totalPlayMs,
     lastPlayed: d.lastPlayed,
     tileSize: d.tileSize,
+    difficulty: d.difficulty,
   };
 }

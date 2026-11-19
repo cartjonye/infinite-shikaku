@@ -6,9 +6,9 @@ An endless, seamless Shikaku world. You solve a zone by splitting it into rectan
 
 The main menu offers three play styles:
 
-- **Endless**: the three worlds below, each with its own save (Continue or New).
+- **Infinity**: the four worlds below, each with its own save (Continue or New).
 - **Time Attack**: clear as much area as possible in 2, 5 or 10 minutes, in a fresh world of your choice. Not saved; personal bests are kept per world and length.
-- **Survival**: start with 90 seconds; every solved zone adds time. Each grid size has a weight (6×6 10, 8×8 15, 10×10 22, 12×12 28, 15×15 40, 16×16 44, 18×18 52, 20×20 61, 24×24 80, scaled to its typical number of pieces). The bonus is `round(base × weight / 10)` seconds, where `base` (the 6×6 bonus) is 30 s for the first three zones, then drops 1 s every three zones down to a floor of 6 s from the 73rd zone. Because it shrinks per zone, big grids are worth most early in a run. A run in progress is saved per world and resumes after a 3, 2, 1 countdown. The pause screen also offers Surrender, which ends the run on the spot with the time survived counted; personal bests rank by time survived.
+- **Survival**: every solved zone adds time, read from the fixed matrix `SURVIVAL_BONUS_S` in `src/runs.ts` (grid size × run step; a step is three zones, and the last column applies from zone 73). 6×6 goes from 30 s to 6 s, 24×24 from 240 s to 120 s. A run starts with 3× the first grid's first bonus: 90 s on a 6×6 start (Classic, Mosaic, Fixed 6×6, Singles Easy), up to 720 s on Fixed 24×24 (`SURVIVAL_START_S`). A run in progress is saved per world and resumes after a 3, 2, 1 countdown. The pause screen also offers Surrender, which ends the run on the spot with the time survived counted; personal bests rank by time survived.
 
 Run logic lives in `src/runs.ts`.
 
@@ -44,6 +44,19 @@ Each mode has its own save, so the menu offers **Continue** or **New game** per 
 ## Scale
 
 `tests/scale.test.ts` plays 5,000 zones in each mode: solve bookkeeping averages well under 0.1 ms, the save stays near 65 KB, and reloading takes about 40 ms. Solved zones are generated in a Web Worker and the puzzle cache is bounded, so large worlds reload without freezing.
+
+## Singles
+
+One Shikaku at a time, level after level. Each difficulty has a 10-level pattern of grid sizes that repeats forever, a little harder each time round:
+
+| Difficulty | Levels 1 to 10 |
+|---|---|
+| Easy | 6, 6, 8, 6, 6, 8, 6, 6, 8, 10 |
+| Medium | 8, 8, 10, 8, 12, 8, 8, 10, 10, 12 |
+| Hard | 10, 10, 12, 12, 15, 16, 12, 15, 16, 18 |
+| Expert | 15, 15, 16, 18, 20, 15, 16, 18, 20, 24 |
+
+Singles is a world in Infinity, Time Attack and Survival (`src/layouts/singles.ts`).
 
 ## Classic: expanding world
 

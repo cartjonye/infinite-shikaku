@@ -89,6 +89,10 @@ export class World {
    */
   private ruleOpens(z: Zone): boolean {
     if (z === this.layout.origin) return true;
+    if (this.layout.unlockRule === 'sequence') {
+      const p = this.layout.prev?.(z);
+      return !!p && this.solved.has(p.key);
+    }
     for (const side of SIDES) if (this.sideState(z, side).satisfied) return true;
     return false;
   }
@@ -100,6 +104,11 @@ export class World {
 
   /** Zones whose status could change when z is solved: everything within two neighbour steps. */
   private around(z: Zone, visit: (n: Zone) => void) {
+    if (this.layout.unlockRule === 'sequence') {
+      const n = this.layout.next?.(z);
+      if (n) visit(n);
+      return;
+    }
     const nb = edgeNeighbours(this.layout, z);
     for (const s of SIDES)
       for (const n of nb[s]) {
@@ -136,7 +145,7 @@ export class World {
    * closest to complete. They are recorded in the save and stay open.
    */
   private unstick(added?: Zone[]) {
-    if (this.open.size > 0 || this.solved.size === 0) return;
+    if (this.open.size > 0 || this.solved.size === 0 || this.layout.unlockRule === 'sequence') return;
     const frontier = new Map<string, Zone>();
     for (const k of this.solved) {
       const z = zoneByKey(this.layout, k);

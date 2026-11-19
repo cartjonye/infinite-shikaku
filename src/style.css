@@ -606,3 +606,20 @@ body.in-run .coach-modal, .coach-modal { background: rgba(6, 7, 11, 0.55); backd
 }
 /* keep the board readable behind the controls card */
 body .coach-modal, body.in-run .coach-modal { backdrop-filter: none; background: rgba(6, 7, 11, 0.35); }
+.diff-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 6px 0 4px; }
+.diff-chip {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 10px;
+  font-weight: 800;
+  font-size: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.diff-chip small { font-size: 12px; font-weight: 700; color: var(--dim); font-variant-numeric: tabular-nums; }
+.diff-chip:hover, .diff-chip:focus-visible { border-color: var(--accent); color: var(--accent); }
+#run-world .seg-btn { padding-left: 4px; padding-right: 4px; }
+.run-panel .best-row[hidden] { display: none; }

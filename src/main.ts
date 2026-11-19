@@ -1,7 +1,11 @@
 import './style.css';
 import {
+  DIFFICULTIES,
+  DIFFICULTY_NAMES,
   FIXED_SIZES,
+  SINGLES_PATTERNS,
   createClassicLayout,
+  createSinglesLayout,
   createFixedLayout,
   createMosaicLayout,
   edgeNeighbours,
@@ -9,7 +13,9 @@ import {
   loadTiler,
   zoneByKey,
   zoneCenter,
+  type Difficulty,
   type ModeId,
+  type SinglesLayout,
   type WorldLayout,
   type Zone,
 } from './layouts';
@@ -28,6 +34,7 @@ import {
   savePrefs,
   submitRecord,
   survivalBonusMs,
+  survivalStartMs,
   SURVIVAL_START_MS,
   writeSurvival,
   type RunState,
@@ -285,6 +292,10 @@ function endPointer(e: PointerEvent, cancelled: boolean) {
     const p = zones.get(z)!;
     const rect = preview.rect;
     let acted = false;
+    // any real action replaces the Undo offer for the previous removal
+    const clearUndo = () => {
+      if (toastAction) hideToast();
+    };
     if (!mode.moved || rect.w * rect.h === 1) {
       // A tap (or a drag inside one cell) only does something on a number:
       // remove the rectangle covering it, or fill a 1.
@@ -294,6 +305,7 @@ function endPointer(e: PointerEvent, cancelled: boolean) {
         {
           const gone = world.removeAt(k, clue.r, clue.c);
           if (gone) {
+            clearUndo();
             acted = true;
             toast('Rectangle removed', {
               action: {
@@ -306,6 +318,7 @@ function endPointer(e: PointerEvent, cancelled: boolean) {
               },
             });
           } else if (clue.v === 1) {
+            clearUndo();
             world.place(k, { r: clue.r, c: clue.c, w: 1, h: 1 });
             acted = true;
           }
@@ -314,11 +327,13 @@ function endPointer(e: PointerEvent, cancelled: boolean) {
     } else {
       const kind = World.classify(p, rect);
       if (kind === 'ok') {
+        clearUndo();
         world.place(k, rect);
         const f = world.failed;
         if (f && f.zone === z && rectsOverlap(f.rect, rect)) world.failed = null;
         acted = true;
       } else if (kind === 'fail') {
+        clearUndo();
         // flash the wrong attempt red for a moment, without touching any placed rectangle
         world.failed = { zone: z, rect: { ...rect }, at: performance.now() };
         acted = true;
@@ -410,6 +425,7 @@ function onSolved(z: Zone) {
   bs.totalMs += ms;
   bs.bestMs = bs.bestMs === null ? ms : Math.min(bs.bestMs, ms);
   for (const o of newlyOpen) zones.request(o, true);
+  nextSingle(newlyOpen);
   const bigger = layout.expansionBanner ? newlyOpen.find((o) => !save.seenSizes.includes(o.size)) : undefined;
   if (bigger) {
     save.seenSizes.push(bigger.size);
@@ -586,9 +602,11 @@ function updateHud() {
     solvedCount.textContent = String(run.zones);
   } else timerEl.classList.remove('low');
   runPillsEl.hidden = !run;
-  continueBtn.hidden = !!f || mode.kind !== 'none' || world.openCount === 0 || runPhase === 'over';
+  const single = isSingles(layout);
+  continueBtn.hidden = single || !!f || mode.kind !== 'none' || world.openCount === 0 || runPhase === 'over';
   const cur = f ?? centerZone();
-  easierBtn.hidden = !(cur.size > world.minOpenSize()) || runPhase === 'over';
+  easierBtn.hidden = single || !(cur.size > world.minOpenSize()) || runPhase === 'over';
+  homeBtn.hidden = single;
   // the Home button points towards the start while it is off screen
   const home = layout.origin;
   const away = !onScreen(home);
@@ -604,6 +622,7 @@ function updateHud() {
 const pauseModal = $('#pause-modal');
 const helpModal = $('#help-modal');
 const sizeModal = $('#size-modal');
+const diffModal = $('#diff-modal');
 const runPauseModal = $('#run-pause-modal');
 const resultsModal = $('#results-modal');
 const coachModal = $('#coach-modal');
@@ -726,6 +745,7 @@ function anyModalOpen() {
     !pauseModal.hidden ||
     !helpModal.hidden ||
     !sizeModal.hidden ||
+    !diffModal.hidden ||
     !runPauseModal.hidden ||
     !resultsModal.hidden ||
     !coachModal.hidden ||
@@ -737,6 +757,7 @@ function closeModals() {
   pauseModal.hidden = true;
   helpModal.hidden = true;
   sizeModal.hidden = true;
+  diffModal.hidden = true;
   runPauseModal.hidden = true;
   coachModal.hidden = true;
   if (inGame && !save.seenHelp) {
@@ -756,10 +777,12 @@ function readyUp(sub?: string) {
   nextCountdownSub = 'Get ready';
   startCountdown(msg);
 }
-const MODE_NAMES: Record<ModeId, string> = { classic: 'Classic', fixed: 'Fixed', mosaic: 'Mosaic' };
+const MODE_NAMES: Record<ModeId, string> = { classic: 'Classic', fixed: 'Fixed', mosaic: 'Mosaic', singles: 'Singles' };
 const STYLE_NAMES: Record<RunStyle, string> = { timeattack: 'Time Attack', survival: 'Survival' };
-function worldPills(world: ModeId, tileSize?: number): (string | [string, string])[] {
-  return world === 'fixed' ? [['Fixed', 'gold'], `${tileSize}×${tileSize}`] : [[MODE_NAMES[world], 'gold']];
+function worldPills(world: ModeId, tileSize?: number, difficulty?: Difficulty): (string | [string, string])[] {
+  if (world === 'fixed') return [['Fixed', 'gold'], `${tileSize}×${tileSize}`];
+  if (world === 'singles') return [['Singles', 'gold'], DIFFICULTY_NAMES[difficulty ?? 'easy']];
+  return [[MODE_NAMES[world], 'gold']];
 }
 function renderStats() {
   const st = save.stats;
@@ -772,7 +795,9 @@ function renderStats() {
     ['Time solving', fmt(st.totalSolveMs)],
     save.mode === 'mosaic'
       ? ['Farthest from home', formatMetres(st.farthestM)]
-      : ['Deepest reached', st.deepest ? `Depth ${st.deepest}` : '–'],
+      : save.mode === 'singles'
+        ? ['Level reached', `Level ${st.zonesSolved + 1}`]
+        : ['Deepest reached', st.deepest ? `Depth ${st.deepest}` : '–'],
     ['Total play time', fmt(st.totalPlayMs)],
   ];
   $('#stats-grid').innerHTML = statGrid(rows);
@@ -787,7 +812,7 @@ function renderStats() {
         })
         .join('')}</tbody></table>`
     : '<p class="muted">Solve a Shikaku to see your times for each grid size.</p>';
-  $('#pause-mode').innerHTML = pills(worldPills(save.mode, save.tileSize));
+  $('#pause-mode').innerHTML = pills(worldPills(save.mode, save.tileSize, save.difficulty));
 }
 const statGrid = (rows: [string, string][]) =>
   rows.map(([k, v]) => `<div class="stat"><div class="stat-v">${esc(v)}</div><div class="stat-k">${esc(k)}</div></div>`).join('');
@@ -821,6 +846,7 @@ homeBtn.addEventListener('click', goHome);
 
 // ---------- sessions & menu ----------
 const HELP_MODE: Record<ModeId, string> = {
+  singles: 'One Shikaku at a time. Solve it to level up. Every few levels the grids get bigger.',
   classic:
     'Your Shikaku grow as you travel, from 6×6 all the way to 24×24. To break into a bigger one, clear <b>one whole side</b> of it plus <b>one corner piece</b> next to that side.',
   fixed:
@@ -835,6 +861,7 @@ const HELP_RUN: Record<RunStyle, string> = {
 
 async function makeLayout(d: SaveData): Promise<WorldLayout> {
   if (d.mode === 'fixed') return createFixedLayout(d.tileSize ?? 8);
+  if (d.mode === 'singles') return createSinglesLayout(d.difficulty ?? 'easy');
   if (d.mode === 'mosaic') {
     const tiler = await loadTiler(`${import.meta.env.BASE_URL}tilings_66x66.packed.txt`);
     return createMosaicLayout(d.seed, tiler);
@@ -860,7 +887,31 @@ function setSession(L: WorldLayout, d: SaveData, persisted: boolean) {
   }
   for (const z of world.openZones()) zones.request(z, true);
   lastInteracted = activeZone();
+  if (isSingles(L)) {
+    const cur = world.openZones()[0] ?? L.origin;
+    L.setCurrent(L.levelOf(cur));
+    cam = camFor(cur);
+    lastInteracted = cur;
+  }
+  document.body.classList.toggle('in-singles', isSingles(L));
   dirty = true;
+}
+
+const isSingles = (L: WorldLayout): L is SinglesLayout => L.mode === 'singles';
+
+/** Singles: after a solve, slide the next level in and fit it (each level can be a new size). */
+function nextSingle(newlyOpen: Zone[]) {
+  const L = layout;
+  const next = newlyOpen[0];
+  if (!isSingles(L) || !next) return;
+  zones.request(next, true);
+  window.setTimeout(() => {
+    if (layout !== L || !inGame) return;
+    L.setCurrent(L.levelOf(next));
+    lastInteracted = next;
+    playCam([{ to: camFor(next), dur: 600 }]);
+    dirty = true;
+  }, 700);
 }
 
 async function startSession(d: SaveData) {
@@ -908,7 +959,7 @@ function endSession() {
   showStyle(style);
 }
 
-async function newGame(m: ModeId, tileSize?: number) {
+async function newGame(m: ModeId, tileSize?: number, difficulty?: Difficulty) {
   if (
     summarize(m) &&
     !(await askConfirm({
@@ -920,7 +971,7 @@ async function newGame(m: ModeId, tileSize?: number) {
   )
     return;
   clearSave(m);
-  startSession(freshSave(m, tileSize));
+  startSession(freshSave(m, tileSize, difficulty));
 }
 
 // ---------- runs: Time Attack & Survival ----------
@@ -961,7 +1012,7 @@ function startCountdown(sub: string) {
 }
 
 async function startRun(r: RunState, resume?: SaveData) {
-  const d = resume ?? { ...freshSave(r.world, r.tileSize), seenHelp: true };
+  const d = resume ?? { ...freshSave(r.world, r.tileSize, r.difficulty), seenHelp: true };
   menuStatus('Building your world…');
   let L: WorldLayout;
   try {
@@ -1010,6 +1061,7 @@ function onRunSolved(z: Zone, newlyOpen: Zone[]) {
   if (!run) return;
   const bonus = creditSolve(run, z.size);
   for (const o of newlyOpen) zones.request(o, true);
+  nextSingle(newlyOpen);
   floatText(z, run.style === 'survival' ? `+${Math.round(bonus / 1000)}s` : `+${area(z.size * z.size)}`);
   const bigger = layout.expansionBanner ? newlyOpen.find((o) => !save.seenSizes.includes(o.size)) : undefined;
   if (bigger) {
@@ -1028,7 +1080,11 @@ function onRunSolved(z: Zone, newlyOpen: Zone[]) {
 }
 
 function runPills(r: RunState): (string | [string, string])[] {
-  return [[STYLE_NAMES[r.style], 'gold'], ...worldPills(r.world, r.tileSize).map((p) => (typeof p === 'string' ? p : p[0])), ...(r.minutes ? [`${r.minutes} min`] : [])];
+  return [
+    [STYLE_NAMES[r.style], 'gold'],
+    ...worldPills(r.world, r.tileSize, r.difficulty).map((p) => (typeof p === 'string' ? p : p[0])),
+    ...(r.minutes ? [`${r.minutes} min`] : []),
+  ];
 }
 
 function openRunPause() {
@@ -1060,10 +1116,10 @@ function endRun(surrendered = false) {
   stopCountdown();
   preview = null;
   mode = { kind: 'none' };
-  const key = recordKey(run.style, run.world, run.tileSize, run.minutes);
+  const key = recordKey(run.style, run.world, run.tileSize, run.minutes, run.difficulty);
   const previous = getRecord(key);
   const isBest = submitRecord(run);
-  if (run.style === 'survival') clearSurvival(run.world, run.tileSize);
+  if (run.style === 'survival') clearSurvival(run.world, run.tileSize, run.difficulty);
   closeModals();
   showResults(run, isBest, previous, surrendered);
   updateHud();
@@ -1103,9 +1159,9 @@ $('#btn-run-restart').addEventListener('click', async () => {
     return;
   if (!run) return;
   const r = run;
-  if (r.style === 'survival') clearSurvival(r.world, r.tileSize);
+  if (r.style === 'survival') clearSurvival(r.world, r.tileSize, r.difficulty);
   runPauseModal.hidden = true;
-  startRun(newRun(r.style, r.world, r.tileSize, r.minutes));
+  startRun(newRun(r.style, r.world, r.tileSize, r.minutes, r.difficulty));
 });
 $('#btn-run-quit').addEventListener('click', async () => {
   if (!run) return;
@@ -1134,7 +1190,7 @@ $('#btn-run-surrender').addEventListener('click', async () => {
 $('#btn-again').addEventListener('click', () => {
   if (!run) return;
   const r = run;
-  startRun(newRun(r.style, r.world, r.tileSize, r.minutes));
+  startRun(newRun(r.style, r.world, r.tileSize, r.minutes, r.difficulty));
 });
 $('#btn-results-menu').addEventListener('click', endSession);
 
@@ -1142,13 +1198,14 @@ $('#btn-results-menu').addEventListener('click', endSession);
 type MenuStyle = 'endless' | RunStyle;
 const STYLE_COPY: Record<MenuStyle, { title: string; pitch: string }> = {
   endless: {
-    title: 'Endless',
+    title: 'Infinity',
     pitch: "Explore your own Shikaku world at your own pace. It's saved, so you can always pick up where you left off.",
   },
   timeattack: { title: 'Time Attack', pitch: 'Beat the clock. Clear as much Shikaku ground as you can before time runs out.' },
   survival: { title: 'Survival', pitch: 'Every Shikaku you solve buys you more time. How long can you last?' },
 };
 const WORLD_DESC: Record<ModeId, string> = {
+  singles: 'One Shikaku at a time. Levels get bigger as you go.',
   classic: 'Starts small and grows bigger the farther you go.',
   fixed: 'One grid size, all the way. You pick it.',
   mosaic: 'Every size, all mixed up, never the same twice.',
@@ -1190,7 +1247,7 @@ function showStyle(style: MenuStyle) {
 }
 
 function renderEndless() {
-  for (const m of ['classic', 'fixed', 'mosaic'] as ModeId[]) {
+  for (const m of ['classic', 'fixed', 'mosaic', 'singles'] as ModeId[]) {
     const card = $(`.mode-card[data-mode="${m}"]`);
     const sum = summarize(m);
     const cont = card.querySelector<HTMLButtonElement>('[data-action="continue"]')!;
@@ -1199,8 +1256,9 @@ function renderEndless() {
     if (sum) {
       line.innerHTML = pills([
         ...(m === 'fixed' ? [[`${sum.tileSize}×${sum.tileSize}`, 'gold'] as [string, string]] : []),
-        `${sum.zonesSolved} solved`,
-        m === 'mosaic' ? formatMetres(sum.farthestM) : `Depth ${sum.deepest || 1}`,
+        ...(m === 'singles' ? [[DIFFICULTY_NAMES[sum.difficulty ?? 'easy'], 'gold'] as [string, string]] : []),
+        m === 'singles' ? `Level ${sum.zonesSolved + 1}` : `${sum.zonesSolved} solved`,
+        ...(m === 'singles' ? [] : [m === 'mosaic' ? formatMetres(sum.farthestM) : `Depth ${sum.deepest || 1}`]),
         `${fmt(sum.totalPlayMs)} played`,
         [ago(sum.lastPlayed), 'dim'],
       ]);
@@ -1212,21 +1270,32 @@ const prefs = loadPrefs();
 function runSettings() {
   const style = menuStyle as RunStyle;
   const p = style === 'timeattack' ? prefs.ta : prefs.sv;
-  return { style, world: p.world, size: p.size, minutes: style === 'timeattack' ? prefs.ta.minutes : undefined };
+  const world = p.world;
+  return {
+    style,
+    world,
+    size: p.size,
+    tile: world === 'fixed' ? p.size : undefined,
+    difficulty: world === 'singles' ? p.difficulty : undefined,
+    minutes: style === 'timeattack' ? prefs.ta.minutes : undefined,
+  };
 }
 function setChecked(container: HTMLElement, attr: string, value: string) {
   container.querySelectorAll<HTMLElement>('.seg-btn').forEach((b) => b.setAttribute('aria-checked', String(b.dataset[attr] === value)));
 }
 function renderRunPanel() {
-  const { style, world, size, minutes } = runSettings();
+  const { style, world, size, tile, difficulty, minutes } = runSettings();
   setChecked($('#run-world'), 'world', world);
   $('#run-world-desc').textContent = WORLD_DESC[world];
   $('#run-size-field').hidden = world !== 'fixed';
   setChecked($('#run-sizes'), 'size', String(size));
+  $('#run-diff-field').hidden = world !== 'singles';
+  setChecked($('#run-diffs'), 'diff', difficulty ?? 'easy');
   $('#run-minutes-field').hidden = style !== 'timeattack';
   setChecked($('#run-minutes'), 'minutes', String(minutes));
-  const tile = world === 'fixed' ? size : undefined;
-  const rec = getRecord(recordKey(style, world, tile, minutes));
+  $('#run-start-row').hidden = style !== 'survival';
+  if (style === 'survival') $('#run-start-time').innerHTML = pills([[clock(survivalStartMs(world, tile, difficulty)), 'gold']]);
+  const rec = getRecord(recordKey(style, world, tile, minutes, difficulty));
   $('#run-best').innerHTML = rec
     ? pills(
         style === 'timeattack'
@@ -1234,7 +1303,7 @@ function renderRunPanel() {
           : [[fmt(rec.survivedMs ?? 0), 'gold'], area(rec.area), zonesText(rec.zones)],
       )
     : pills([['No record yet', 'dim']]);
-  const slot = style === 'survival' ? loadSurvival(world, tile) : null;
+  const slot = style === 'survival' ? loadSurvival(world, tile, difficulty) : null;
   $('#sv-saved').hidden = !slot;
   $('#btn-run-start').hidden = !!slot;
   if (slot)
@@ -1246,40 +1315,38 @@ function renderRunPanel() {
     ]);
 }
 $('#run-sizes').innerHTML = FIXED_SIZES.map((n) => `<button class="seg-btn" data-size="${n}" role="radio">${n}×${n}</button>`).join('');
+$('#run-diffs').innerHTML = DIFFICULTIES.map((d) => `<button class="seg-btn" data-diff="${d}" role="radio">${DIFFICULTY_NAMES[d]}</button>`).join('');
 $('#run-minutes').innerHTML = TA_MINUTES.map((n) => `<button class="seg-btn" data-minutes="${n}" role="radio">${n} min</button>`).join('');
-function updatePrefs(change: (p: { world: ModeId; size: number; minutes?: number }) => void) {
+function updatePrefs(change: (p: { world: ModeId; size: number; minutes?: number; difficulty: Difficulty }) => void) {
   const p = menuStyle === 'timeattack' ? prefs.ta : prefs.sv;
   change(p);
   savePrefs(prefs);
   renderRunPanel();
 }
-$('#run-world').addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLElement>('.seg-btn');
-  if (b) updatePrefs((p) => (p.world = b.dataset.world as ModeId));
-});
-$('#run-sizes').addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLElement>('.seg-btn');
-  if (b) updatePrefs((p) => (p.size = Number(b.dataset.size)));
-});
-$('#run-minutes').addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLElement>('.seg-btn');
-  if (b) updatePrefs((p) => (p.minutes = Number(b.dataset.minutes)));
-});
+const segClick = (id: string, apply: (b: HTMLElement) => void) =>
+  $(id).addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('.seg-btn');
+    if (b) apply(b);
+  });
+segClick('#run-world', (b) => updatePrefs((p) => (p.world = b.dataset.world as ModeId)));
+segClick('#run-sizes', (b) => updatePrefs((p) => (p.size = Number(b.dataset.size))));
+segClick('#run-diffs', (b) => updatePrefs((p) => (p.difficulty = b.dataset.diff as Difficulty)));
+segClick('#run-minutes', (b) => updatePrefs((p) => (p.minutes = Number(b.dataset.minutes))));
 $('#btn-run-start').addEventListener('click', () => {
-  const { style, world, size, minutes } = runSettings();
-  startRun(newRun(style, world, size, minutes));
+  const { style, world, tile, difficulty, minutes } = runSettings();
+  startRun(newRun(style, world, tile, minutes, difficulty));
 });
 $('#btn-sv-continue').addEventListener('click', () => {
-  const { world, size } = runSettings();
-  const slot = loadSurvival(world, world === 'fixed' ? size : undefined);
+  const { world, tile, difficulty } = runSettings();
+  const slot = loadSurvival(world, tile, difficulty);
   if (slot) startRun(slot.run, slot.save);
 });
 $('#btn-sv-new').addEventListener('click', async () => {
-  const { world, size } = runSettings();
+  const { world, tile, difficulty } = runSettings();
   if (!(await askConfirm({ title: 'Start a new run?', body: 'Your run in progress will be lost.', ok: 'Start new run', danger: true })))
     return;
-  clearSurvival(world, world === 'fixed' ? size : undefined);
-  startRun(newRun('survival', world, size));
+  clearSurvival(world, tile, difficulty);
+  startRun(newRun('survival', world, tile, undefined, difficulty));
 });
 
 document.querySelectorAll<HTMLButtonElement>('.style-btn').forEach((b) =>
@@ -1294,7 +1361,19 @@ document.querySelectorAll<HTMLButtonElement>('.mode-card button').forEach((btn) 
       if (d) startSession(d);
     } else if (m === 'fixed') {
       sizeModal.hidden = false;
+    } else if (m === 'singles') {
+      diffModal.hidden = false;
     } else newGame(m);
+  }),
+);
+const sizesText = (d: Difficulty) => [...new Set(SINGLES_PATTERNS[d])].sort((a, b) => a - b).join(', ');
+$('#diff-grid').innerHTML = DIFFICULTIES.map(
+  (d) => `<button class="diff-chip" data-diff="${d}">${DIFFICULTY_NAMES[d]}<small>${sizesText(d)}</small></button>`,
+).join('');
+document.querySelectorAll<HTMLButtonElement>('.diff-chip').forEach((b) =>
+  b.addEventListener('click', () => {
+    diffModal.hidden = true;
+    newGame('singles', undefined, b.dataset.diff as Difficulty);
   }),
 );
 $('#size-grid').innerHTML = FIXED_SIZES.map((n) => `<button class="size-chip" data-size="${n}">${n}×${n}</button>`).join('');
@@ -1391,6 +1470,10 @@ const zoneOf = (key: string) => zoneByKey(layout, key) ?? layout.origin;
   },
   get origin() {
     return layout.origin.key;
+  },
+  /** Singles: the level on screen */
+  get current() {
+    return isSingles(layout) ? layout.levelZone(layout.current()).key : null;
   },
   zoneAt: (x: number, y: number) => layout.zoneAtCell(x, y),
   solution: (key: string) => zones.getNow(zoneOf(key)).solution,

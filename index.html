@@ -151,6 +151,15 @@
       <div class="countdown-sub"></div>
     </div>
 
+    <div id="diff-modal" class="modal" hidden>
+      <div class="sheet">
+        <h2>Pick your challenge</h2>
+        <p class="muted">One Shikaku at a time. Every few levels the grids get bigger.</p>
+        <div id="diff-grid" class="diff-grid"></div>
+        <div class="row"><button class="secondary" data-close>Cancel</button></div>
+      </div>
+    </div>
+
     <div id="menu" class="menu" hidden>
       <div class="menu-inner">
         <section id="menu-home" class="menu-screen">
@@ -159,7 +168,7 @@
           <div class="style-list">
             <button class="style-btn" data-style="endless">
               <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M7.5 8.5c-2 0-3.5 1.6-3.5 3.5s1.5 3.5 3.5 3.5c3 0 6-7 9-7 2 0 3.5 1.6 3.5 3.5s-1.5 3.5-3.5 3.5c-3 0-6-7-9-7z" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linejoin="round"/></svg>
-              <span>Endless</span>
+              <span>Infinity</span>
             </button>
             <button class="style-btn" data-style="timeattack">
               <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5" stroke="currentColor" stroke-width="2.2" fill="none"/><path d="M12 9.5v4.2l2.8 1.7M9.5 3h5M12 3v2.5" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>
@@ -217,6 +226,18 @@
                 <button class="secondary" data-action="new">New</button>
               </div>
             </section>
+            <section class="mode-card" data-mode="singles">
+              <div class="mode-head">
+                <h3>Singles</h3>
+                <span class="mode-badge">One at a time</span>
+              </div>
+              <p>One Shikaku at a time, level after level. Pick your challenge.</p>
+              <div class="mode-save pill-row"></div>
+              <div class="mode-actions">
+                <button class="primary" data-action="continue">Continue</button>
+                <button class="secondary" data-action="new">New</button>
+              </div>
+            </section>
           </div>
 
           <div id="run-panel" class="run-panel" hidden>
@@ -226,6 +247,7 @@
                 <button class="seg-btn" data-world="classic" role="radio">Classic</button>
                 <button class="seg-btn" data-world="fixed" role="radio">Fixed</button>
                 <button class="seg-btn" data-world="mosaic" role="radio">Mosaic</button>
+                <button class="seg-btn" data-world="singles" role="radio">Singles</button>
               </div>
               <div id="run-world-desc" class="field-desc"></div>
             </div>
@@ -233,9 +255,17 @@
               <div class="field-label">Grid</div>
               <div id="run-sizes" class="seg seg-wrap" role="radiogroup" aria-label="Grid size"></div>
             </div>
+            <div id="run-diff-field" class="field" hidden>
+              <div class="field-label">Challenge</div>
+              <div id="run-diffs" class="seg" role="radiogroup" aria-label="Challenge"></div>
+            </div>
             <div id="run-minutes-field" class="field">
               <div class="field-label">Time</div>
               <div id="run-minutes" class="seg" role="radiogroup" aria-label="Time limit"></div>
+            </div>
+            <div id="run-start-row" class="best-row" hidden>
+              <div class="field-label">Starting time</div>
+              <div id="run-start-time" class="pill-row"></div>
             </div>
             <div class="best-row">
               <div class="field-label">Personal best</div>

@@ -266,7 +266,8 @@ export class Renderer {
       }
     }
 
-    this.homeBadge(cam, world, now);
+    // Singles shows one puzzle at a time, so there is no home to mark
+    if (world.layout.unlockRule !== 'sequence') this.homeBadge(cam, world, now);
 
     // the last wrong attempt: a red flash that fades out over FAIL_FADE_MS
     const failed = world.failed;

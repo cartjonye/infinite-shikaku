@@ -3,3 +3,12 @@ export * from './core';
 export { createClassicLayout, classicDepth, TIERS, innerOf } from './classic';
 export { createFixedLayout, FIXED_SIZES } from './fixed';
 export { createMosaicLayout, loadTiler, formatMetres, SUPER } from './mosaic';
+export {
+  createSinglesLayout,
+  singlesSize,
+  DIFFICULTIES,
+  DIFFICULTY_NAMES,
+  SINGLES_PATTERNS,
+  type Difficulty,
+  type SinglesLayout,
+} from './singles';

@@ -1,4 +1,4 @@
-export type ModeId = 'classic' | 'fixed' | 'mosaic';
+export type ModeId = 'classic' | 'fixed' | 'mosaic' | 'singles';
 
 export interface Zone {
   key: string;
@@ -31,8 +31,12 @@ export interface WorldLayout {
    * - 'step-diagonal': any neighbour on a side; on a side bordering smaller zones,
    *   the whole side plus one diagonal zone (Classic, Fixed)
    * - 'full-side': every zone along any one side solved, no diagonal (Mosaic)
+   * - 'sequence': each zone opens when the one before it is solved (Singles)
    */
-  unlockRule: 'step-diagonal' | 'full-side';
+  unlockRule: 'step-diagonal' | 'full-side' | 'sequence';
+  /** 'sequence' only: the zone after / before this one */
+  next?(z: Zone): Zone | null;
+  prev?(z: Zone): Zone | null;
 }
 
 export const zoneKey = (size: number, x0: number, y0: number) => `${size}@${x0},${y0}`;
