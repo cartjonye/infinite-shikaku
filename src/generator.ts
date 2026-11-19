@@ -121,9 +121,12 @@ export interface ZoneSpec {
   size: number;
   /** difficulty driver from the world layout */
   depth: number;
+  /** seed by this id instead of position (Singles levels) */
+  seedId?: number;
 }
 
 function attemptSeed(worldSeed: number, z: ZoneSpec, attempt: number) {
+  if (z.seedId !== undefined) return hashInts(worldSeed, 0x5146, z.seedId, z.size * 7919 + attempt, 2);
   return hashInts(worldSeed, z.x0, z.y0, z.size * 7919 + attempt, 2);
 }
 

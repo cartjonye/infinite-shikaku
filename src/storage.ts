@@ -2,7 +2,7 @@
  * localStorage persistence, one save per game mode.
  * Every access is guarded so the game still runs (without saving) when storage is unavailable.
  */
-import { zoneByKey, type Difficulty, type ModeId, type WorldLayout } from './layouts';
+import { legacyLevelOf, levelKey, zoneByKey, type Difficulty, type ModeId, type WorldLayout } from './layouts';
 import type { Rect } from './types';
 
 export const SAVE_VERSION = 4;
@@ -10,7 +10,7 @@ const KEYS: Record<ModeId, string> = {
   classic: 'infinite-shikaku:classic:v4',
   fixed: 'infinite-shikaku:fixed:v2',
   mosaic: 'infinite-shikaku:mosaic:v2',
-  singles: 'infinite-shikaku:singles:v2',
+  singles: 'infinite-shikaku:singles:v3',
 };
 const LAST_MODE_KEY = 'infinite-shikaku:last-mode';
 // Saves made before the puzzle generator changed no longer match their worlds.
@@ -20,7 +20,11 @@ const LEGACY_KEYS = [
   'infinite-shikaku:v3',
   'infinite-shikaku:fixed:v1',
   'infinite-shikaku:mosaic:v1',
-  'infinite-shikaku:singles:v1',
+];
+/** Older Singles saves named levels by position; they are converted, not deleted. */
+const SINGLES_OLD: [string, 1 | 2][] = [
+  ['infinite-shikaku:singles:v2', 2],
+  ['infinite-shikaku:singles:v1', 1],
 ];
 
 export interface SizeStats {
@@ -133,9 +137,50 @@ function isValid(d: any, mode: ModeId): boolean {
 // Saves from the original 8/12/16/20 layouts are gone for good.
 LEGACY_KEYS.forEach(remove);
 
+/**
+ * Convert a Singles save from the old position-based keys to level keys. Solved
+ * levels, stats, play time and difficulty carry over; work in progress on the current
+ * level is dropped, because its puzzle changes once with level-based seeding.
+ */
+export function migrateSinglesSave(d: any, version: 1 | 2): SaveData | null {
+  if (!isValid(d, 'singles')) return null;
+  const diff = d.difficulty as Difficulty;
+  const levels = new Set<number>();
+  for (const k of d.solved) {
+    const n = legacyLevelOf(diff, k, version);
+    if (n > 0) levels.add(n);
+  }
+  // levels are solved in order, so keep the unbroken run from level 1
+  let top = 0;
+  while (levels.has(top + 1)) top++;
+  return {
+    ...freshSave('singles', undefined, diff),
+    ...d,
+    mode: 'singles',
+    solved: Array.from({ length: top }, (_, i) => levelKey(i + 1)),
+    rects: {},
+    timers: {},
+    active: null,
+    opened: [],
+    custom: {},
+    cam: null,
+    stats: { ...emptyStats(), ...d.stats },
+  };
+}
+
+function loadOldSingles(): SaveData | null {
+  for (const [key, version] of SINGLES_OLD) {
+    const d = migrateSinglesSave(read(key), version);
+    if (!d) continue;
+    if (writeSave(d)) SINGLES_OLD.forEach(([k]) => remove(k));
+    return d;
+  }
+  return null;
+}
+
 export function loadSave(mode: ModeId): SaveData | null {
   const d = read(KEYS[mode]);
-  if (!isValid(d, mode)) return null;
+  if (!isValid(d, mode)) return mode === 'singles' ? loadOldSingles() : null;
   return { ...freshSave(mode), ...d, mode, stats: { ...emptyStats(), ...d.stats } };
 }
 

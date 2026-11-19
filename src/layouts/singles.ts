@@ -29,9 +29,35 @@ export const SINGLES_PATTERNS: Record<Difficulty, number[]> = {
 
 /** Puzzle depth of level 1; each later level is one step deeper. */
 const BASE_DEPTH: Record<Difficulty, number> = { easy: 1, medium: 8, hard: 16, expert: 26 };
+/** cells between levels on the board; purely visual (keys and seeds don't depend on it) */
 const GAP = 4;
 
 export const singlesSize = (d: Difficulty, level: number) => SINGLES_PATTERNS[d][(level - 1) % 10];
+
+/** Saved key of a level. Keys and puzzle seeds use the level number, never the position. */
+export const levelKey = (level: number) => `L${level}`;
+const parseLevelKey = (key: string) => {
+  const m = /^L(\d+)$/.exec(key);
+  return m ? Number(m[1]) : 0;
+};
+
+/**
+ * Level number of a zone key from an older Singles save, which named levels by
+ * position ("size@x,y"). Version 1 put levels top-aligned, version 2 centred them;
+ * both used a 4-cell gap. Returns 0 if the key isn't a level.
+ */
+export function legacyLevelOf(d: Difficulty, key: string, version: 1 | 2): number {
+  const m = /^(\d+)@(-?\d+),(-?\d+)$/.exec(key);
+  if (!m) return 0;
+  const [size, x0, y0] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  let x = 0;
+  for (let n = 1; x <= x0; n++) {
+    const s = singlesSize(d, n);
+    if (x === x0) return s === size && y0 === (version === 1 ? 0 : -Math.floor(s / 2)) ? n : 0;
+    x += s + 4;
+  }
+  return 0;
+}
 
 export interface SinglesLayout extends WorldLayout {
   difficulty: Difficulty;
@@ -49,7 +75,6 @@ export interface SinglesLayout extends WorldLayout {
 }
 
 export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
-  const pool = new ZonePool();
   const voids = new ZonePool();
   const starts: number[] = [0]; // starts[i] = x0 of level i + 1
   const zones: Zone[] = [];
@@ -59,7 +84,8 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
       const n = zones.length + 1;
       const size = singlesSize(difficulty, n);
       const x0 = starts[n - 1];
-      const z = pool.get(size, x0, -Math.floor(size / 2));
+      // positions are only for drawing; the key and the puzzle seed come from the level
+      const z: Zone = { key: levelKey(n), x0, y0: -Math.floor(size / 2), size, seedId: n };
       zones.push(z);
       levelByKey.set(z.key, n);
       starts.push(x0 + size + GAP);
@@ -116,6 +142,10 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
       return n && n > 1 ? levelZone(n - 1) : null;
     },
     levelOf: (z) => levelByKey.get(z.key) ?? 0,
+    zoneByKey: (key) => {
+      const n = parseLevelKey(key);
+      return n > 0 ? levelZone(n) : null;
+    },
     levelZone,
     setCurrent(level, keepPrevious = false) {
       const next = Math.max(1, level);

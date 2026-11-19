@@ -6,6 +6,8 @@ export { createMosaicLayout, loadTiler, formatMetres, SUPER } from './mosaic';
 export {
   createSinglesLayout,
   singlesSize,
+  levelKey,
+  legacyLevelOf,
   DIFFICULTIES,
   DIFFICULTY_NAMES,
   SINGLES_PATTERNS,

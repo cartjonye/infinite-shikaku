@@ -114,3 +114,21 @@ describe('runs', () => {
     expect(loadSurvival('fixed', 8)).toBeNull();
   });
 });
+
+describe('Singles Survival runs from older versions', () => {
+  it('are converted to level keys with the run itself kept', () => {
+    mem.clear();
+    const run = newRun('survival', 'singles', undefined, undefined, 'easy');
+    run.clockMs = 77_000;
+    run.zones = 3;
+    const save = freshSave('singles', undefined, 'easy');
+    save.solved = ['6@0,-3', '6@10,-3', '8@20,-4']; // version 2 (centred) positions of levels 1-3
+    mem.set('infinite-shikaku:survival:singles-easy:v2', JSON.stringify({ v: 1, save, run }));
+    const slot = loadSurvival('singles', undefined, 'easy')!;
+    expect(slot.save.solved).toEqual(['L1', 'L2', 'L3']);
+    expect(slot.run.clockMs).toBe(77_000);
+    expect(slot.run.zones).toBe(3);
+    expect(mem.has('infinite-shikaku:survival:singles-easy:v2')).toBe(false);
+    expect(mem.has('infinite-shikaku:survival:singles-easy:v3')).toBe(true);
+  });
+});

@@ -4,7 +4,7 @@
  * and the player's last-picked run settings.
  */
 import { singlesSize, type Difficulty, type ModeId } from './layouts';
-import type { SaveData } from './storage';
+import { migrateSinglesSave, type SaveData } from './storage';
 
 export type RunStyle = 'timeattack' | 'survival';
 
@@ -140,8 +140,8 @@ export function isBetter(style: RunStyle, a: RunRecord, b: RunRecord | null | un
 // ---------- storage helpers ----------
 const RECORDS_KEY = 'infinite-shikaku:records:v1';
 const PREFS_KEY = 'infinite-shikaku:run-prefs:v1';
-const survivalKey = (world: ModeId, tileSize?: number, difficulty?: Difficulty) =>
-  `infinite-shikaku:survival:${worldId(world, tileSize, difficulty)}:${world === 'singles' ? 'v2' : 'v1'}`;
+const survivalKey = (world: ModeId, tileSize?: number, difficulty?: Difficulty, version?: number) =>
+  `infinite-shikaku:survival:${worldId(world, tileSize, difficulty)}:v${version ?? (world === 'singles' ? 3 : 1)}`;
 
 function read<T>(key: string): T | null {
   try {
@@ -190,10 +190,31 @@ export interface SurvivalSlot {
   run: RunState;
 }
 
+const validSlot = (d: SurvivalSlot | null) =>
+  !!d && d.v === 1 && !!d.save && !!d.run && d.run.style === 'survival' && d.run.clockMs > 0;
+
 export function loadSurvival(world: ModeId, tileSize?: number, difficulty?: Difficulty): SurvivalSlot | null {
   const d = read<SurvivalSlot>(survivalKey(world, tileSize, difficulty));
-  if (!d || d.v !== 1 || !d.save || !d.run || d.run.style !== 'survival' || !(d.run.clockMs > 0)) return null;
-  return d;
+  if (validSlot(d)) return d;
+  if (world !== 'singles') return null;
+  // older Singles runs named levels by position: convert them, keeping the run itself
+  for (const version of [2, 1] as const) {
+    const old = read<SurvivalSlot>(survivalKey(world, tileSize, difficulty, version));
+    if (!validSlot(old)) continue;
+    const save = migrateSinglesSave(old!.save, version);
+    if (!save) continue;
+    const slot: SurvivalSlot = { v: 1, save, run: old!.run };
+    if (write(survivalKey(world, tileSize, difficulty), slot))
+      for (const v of [1, 2]) {
+        try {
+          localStorage.removeItem(survivalKey(world, tileSize, difficulty, v));
+        } catch {
+          /* ignore */
+        }
+      }
+    return slot;
+  }
+  return null;
 }
 export function writeSurvival(save: SaveData, run: RunState): boolean {
   return write(survivalKey(run.world, run.tileSize, run.difficulty), { v: 1, save, run } satisfies SurvivalSlot);

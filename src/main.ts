@@ -1485,6 +1485,10 @@ const zoneOf = (key: string) => zoneByKey(layout, key) ?? layout.origin;
     return isSingles(layout) ? layout.levelZone(layout.current()).key : null;
   },
   zoneAt: (x: number, y: number) => layout.zoneAtCell(x, y),
+  zoneInfo: (key: string) => {
+    const z = zoneOf(key);
+    return { x0: z.x0, y0: z.y0, size: z.size };
+  },
   solution: (key: string) => zones.getNow(zoneOf(key)).solution,
   clues: (key: string) => zones.getNow(zoneOf(key)).clues,
   toScreen: (wx: number, wy: number) => {

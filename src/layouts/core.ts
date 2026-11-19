@@ -16,6 +16,7 @@ function cacheFor(L: WorldLayout): Caches {
 }
 
 export function zoneByKey(L: WorldLayout, key: string): Zone | null {
+  if (L.zoneByKey) return L.zoneByKey(key);
   const m = /^(\d+)@(-?\d+),(-?\d+)$/.exec(key);
   if (!m) return null;
   const size = Number(m[1]);

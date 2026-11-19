@@ -5,6 +5,12 @@ export interface Zone {
   x0: number;
   y0: number;
   size: number;
+  /**
+   * Puzzle seed id for zones whose identity isn't their position (Singles levels).
+   * When set, the puzzle depends on this instead of x0/y0, so moving the zone on the
+   * board never changes its puzzle.
+   */
+  seedId?: number;
 }
 
 export type Side = 'l' | 'r' | 't' | 'b';
@@ -37,6 +43,8 @@ export interface WorldLayout {
   /** 'sequence' only: the zone after / before this one */
   next?(z: Zone): Zone | null;
   prev?(z: Zone): Zone | null;
+  /** resolve a saved zone key, for layouts whose keys aren't "size@x,y" */
+  zoneByKey?(key: string): Zone | null;
 }
 
 export const zoneKey = (size: number, x0: number, y0: number) => `${size}@${x0},${y0}`;

@@ -43,7 +43,7 @@ export class ZoneCache {
   }
 
   private spec(z: Zone) {
-    return { x0: z.x0, y0: z.y0, size: z.size, depth: this.layout.depthFor(z) };
+    return { x0: z.x0, y0: z.y0, size: z.size, depth: this.layout.depthFor(z), seedId: z.seedId };
   }
 
   /** Stop the worker (when leaving a game). */
