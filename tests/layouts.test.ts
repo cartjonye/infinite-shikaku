@@ -4,13 +4,13 @@ import { describe, expect, it } from 'vitest';
 import {
   SIDES,
   SUPER,
-  TIERS,
-  createClassicLayout,
-  createFixedLayout,
+  JOURNEY_RINGS,
+  createFocusedLayout,
+  createJourneyLayout,
   createMosaicLayout,
   diagonalZones,
   edgeNeighbours,
-  innerOf,
+  ringInner,
   isStepSide,
   zoneByKey,
   zoneCenter,
@@ -45,8 +45,8 @@ function checkSymmetricNeighbours(L: WorldLayout, R: number) {
   }
 }
 
-describe('Classic', () => {
-  const L = createClassicLayout();
+describe('Journey', () => {
+  const L = createJourneyLayout();
   const EXPECTED = [
     { size: 6, zones: 144, depth: [1, 6] },
     { size: 8, zones: 144, depth: [7, 9] },
@@ -66,7 +66,7 @@ describe('Classic', () => {
       const zs = all.filter((z) => {
         const [cx, cy] = zoneCenter(z);
         const r = Math.max(Math.abs(cx), Math.abs(cy));
-        return r >= innerOf(i) && r < TIERS[i].outer;
+        return r >= ringInner(i) && r < JOURNEY_RINGS[i].outer;
       });
       expect(zs.length).toBe(e.zones);
       expect(zs.every((z) => z.size === e.size)).toBe(true);
@@ -86,33 +86,11 @@ describe('Classic', () => {
     const side = edgeNeighbours(L, z).l;
     const diags = diagonalZones(L, z, 'l');
     expect(diags.some((d) => side.includes(d))).toBe(false);
-    const save = freshSave('classic');
+    const save = freshSave('journey');
     save.solved = side.map((n) => n.key);
     expect(new World(L, save).status(z)).toBe('locked');
     save.solved = [...side.map((n) => n.key), diags[0].key];
     expect(new World(L, save).status(z)).toBe('open');
-  });
-});
-
-describe('Fixed', () => {
-  for (const size of [6, 15, 24]) {
-    const L = createFixedLayout(size);
-    it(`${size}x${size} tiles exactly with ring depths`, () => {
-      checkTiling(L, 100);
-      expect(L.origin.key).toBe(`${size}@0,0`);
-      expect(L.depthFor(L.origin)).toBe(1);
-      expect(L.depthFor(L.zoneAtCell(-1, -1))).toBe(2);
-      expect(L.depthFor(L.zoneAtCell(size, 0))).toBe(2);
-      expect(L.depthFor(L.zoneAtCell(-2 * size - 1, 0))).toBe(4);
-    });
-  }
-
-  it('opens a zone from any single solved neighbour', () => {
-    const L = createFixedLayout(10);
-    const save = freshSave('fixed', 10);
-    save.solved = [L.origin.key];
-    const w = new World(L, save);
-    expect(w.openZones().length).toBe(4);
   });
 });
 
@@ -241,8 +219,8 @@ describe('World bookkeeping', () => {
   });
 
   it('keeps the player\'s own tiling if it ever differs from the generated solution', () => {
-    const L = createFixedLayout(6);
-    const save = freshSave('fixed', 6);
+    const L = createFocusedLayout(6);
+    const save = freshSave('focused', { size: 6 });
     const w = new World(L, save);
     const fake = { size: 6, clues: [], solution: [{ r: 0, c: 0, w: 6, h: 6 }], needsSearch: false };
     save.rects[L.origin.key] = [
@@ -252,7 +230,7 @@ describe('World bookkeeping', () => {
     w.markSolved(L.origin, fake);
     expect(w.shownRects(L.origin, fake).length).toBe(2);
     // and nothing is stored when it matches
-    const n = L.zoneAtCell(6, 0);
+    const n = L.levelZone(2);
     save.rects[n.key] = [{ r: 0, c: 0, w: 6, h: 6 }];
     w.markSolved(n, fake);
     expect(save.custom[n.key]).toBeUndefined();

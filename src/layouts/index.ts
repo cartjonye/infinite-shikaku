@@ -1,16 +1,16 @@
 export * from './types';
 export * from './core';
-export { createClassicLayout, classicDepth, TIERS, innerOf } from './classic';
-export { createFixedLayout, FIXED_SIZES } from './fixed';
+export { createJourneyLayout, journeyDepth, JOURNEY_RINGS, ringInner } from './journey';
 export { createMosaicLayout, loadTiler, formatMetres, SUPER } from './mosaic';
 export {
-  createSinglesLayout,
-  singlesSize,
+  createClassicLayout,
+  createFocusedLayout,
+  classicLevelSize,
   levelKey,
-  legacyLevelOf,
+  CLASSIC_PATTERNS,
   DIFFICULTIES,
   DIFFICULTY_NAMES,
-  SINGLES_PATTERNS,
+  FOCUSED_SIZES,
   type Difficulty,
   type SinglesLayout,
 } from './singles';

@@ -139,7 +139,7 @@ export class Renderer {
     const visible = world.layout.zonesInRect(wx0, wy0, wx1, wy1);
     zones.ensureCapacity(visible.length * 2);
 
-    for (const z of visible) {
+    const drawZone = (z: Zone) => {
       const st = world.status(z);
       const k = z.key;
       const fade = {} as Record<Side, number>;
@@ -179,7 +179,7 @@ export class Renderer {
           this.lock(whole.x + whole.w / 2, whole.y + whole.h / 2, lockSize);
           this.sideProgress(cam, world, z, whole, lockSize);
         }
-        continue;
+        return;
       }
 
       const p = zones.get(z);
@@ -187,7 +187,7 @@ export class Renderer {
         // generated off the main thread; the cache calls back and triggers a redraw
         zones.request(z, st === 'open');
         if (st === 'solved') {
-          c.globalAlpha = 0.5;
+          c.globalAlpha *= 0.5;
           c.fillStyle = this.colorFor(z, 0);
         } else c.fillStyle = this.colors.fogNear;
         if (far) c.fillRect(whole.x, whole.y, whole.w, whole.h);
@@ -195,8 +195,7 @@ export class Renderer {
           this.rr(whole.x, whole.y, whole.w, whole.h, rad * 1.5);
           c.fill();
         }
-        c.globalAlpha = 1;
-        continue;
+        return;
       }
 
       const solved = st === 'solved';
@@ -234,7 +233,7 @@ export class Renderer {
         c.fillStyle = idx >= 0 ? this.colorFor(z, idx) : this.colors.invalid;
         if (far) {
           c.fillRect(b.x, b.y, b.w, b.h);
-          continue;
+          return;
         }
         this.rr(b.x, b.y, b.w, b.h, rad);
         c.fill();
@@ -264,7 +263,17 @@ export class Renderer {
           c.fillText(String(q.v), px, py + fs * 0.04);
         }
       }
+        };
+    for (const z of visible) {
+      // Singles fades levels in and out while sliding between them
+      const alpha = world.layout.alphaFor?.(z, now) ?? 1;
+      if (alpha <= 0) continue;
+      c.save();
+      c.globalAlpha = alpha;
+      drawZone(z);
+      c.restore();
     }
+    if (world.layout.animating?.()) animating = true;
 
     // Singles shows one puzzle at a time, so there is no home to mark
     if (world.layout.unlockRule !== 'sequence') this.homeBadge(cam, world, now);

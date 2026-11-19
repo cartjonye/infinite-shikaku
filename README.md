@@ -2,28 +2,46 @@
 
 An endless, seamless Shikaku world. You solve a zone by splitting it into rectangles: each rectangle holds exactly one number, and that number is its area. Solving zones unlocks more of the world.
 
+## Modes
+
+Every mode belongs to one of two families:
+
+| Family | Mode | What it is | Layout |
+|---|---|---|---|
+| **Singles**: one Shikaku at a time | **Classic** | Levels follow a 10-level size pattern per difficulty (Easy, Medium, Hard, Expert), repeating and getting harder | `src/layouts/singles.ts` |
+| | **Focused** | Every level is the grid size you pick (6 to 24), each a little harder | `src/layouts/singles.ts` |
+| **World**: a map you explore | **Journey** | Zones grow in concentric rings from 6×6 to 24×24 | `src/layouts/journey.ts` |
+| | **Mosaic** | Random 66×66 patchworks of every size | `src/layouts/mosaic.ts` |
+
+Classic's level patterns:
+
+| Difficulty | Levels 1 to 10 |
+|---|---|
+| Easy | 6, 6, 8, 6, 6, 8, 6, 6, 8, 10 |
+| Medium | 8, 8, 10, 8, 12, 8, 8, 10, 10, 12 |
+| Hard | 10, 10, 12, 12, 15, 16, 12, 15, 16, 18 |
+| Expert | 15, 15, 16, 18, 20, 15, 16, 18, 20, 24 |
+
+Singles levels are keyed and seeded by level number, so their position on the board is purely visual. Moving to the next level is a straight slide in which the finished Shikaku fades out and the next fades in.
+
+Mosaic details:
+- The tilings come from the bundled square-tiling-66 dataset: `public/tilings_66x66.packed.txt` and `src/vendor/tiling.js`.
+- The start is the 6×6 zone nearest the centre of the first supertile; the HUD shows the straight-line distance to it (1 cell = 1 m).
+- A zone opens when every zone along any one of its sides is solved. If that ever leaves nothing open, the frontier zone(s) closest to completing a side open, so a game can never get stuck.
+
 ## Play styles
 
-The main menu offers three play styles:
+The main menu offers three play styles. Each shows the four modes as animated cards, Singles on top and World below.
 
-- **Infinity**: the four worlds below, each with its own save (Continue or New).
-- **Time Attack**: clear as much area as possible in 2, 5 or 10 minutes, in a fresh world of your choice. Not saved; personal bests are kept per world and length.
-- **Survival**: every solved zone adds time, read from the fixed matrix `SURVIVAL_BONUS_S` in `src/runs.ts` (grid size × run step; a step is three zones, and the last column applies from zone 73). 6×6 goes from 30 s to 6 s, 24×24 from 240 s to 120 s. A run starts with 3× the first grid's first bonus: 90 s on a 6×6 start (Classic, Mosaic, Fixed 6×6, Singles Easy), up to 720 s on Fixed 24×24 (`SURVIVAL_START_S`). A run in progress is saved per world and resumes after a 3, 2, 1 countdown. The pause screen also offers Surrender, which ends the run on the spot with the time survived counted; personal bests rank by time survived.
+- **Infinity**: tap a card for its sheet with **Continue** or **New** (Classic asks for a difficulty, Focused for a size). One save per mode.
+- **Time Attack**: clear as much area as possible in 2, 5 or 10 minutes, in a fresh game of the chosen mode. Not saved; personal bests are kept per mode, option and length.
+- **Survival**: every solved zone adds time, read from the fixed matrix `SURVIVAL_BONUS_S` in `src/runs.ts` (grid size × run step; a step is three zones, and the last column applies from zone 73). 6×6 goes from 30 s to 6 s, 24×24 from 240 s to 120 s. A run starts with 3× the first grid's first bonus (`SURVIVAL_START_S`): 90 s on a 6×6 start, up to 12:00 on Focused 24×24. A run in progress is saved per mode and option. Surrender ends the run with the time survived counted.
 
 Run logic lives in `src/runs.ts`.
 
-## Worlds
+## Saves
 
-Each mode has its own save, so the menu offers **Continue** or **New game** per mode.
-
-- **Classic**: zones grow in concentric rings from 6×6 to 24×24 (see below). The HUD shows the depth.
-- **Fixed**: you pick one tile size (6, 8, 10, 12, 15, 16, 18, 20 or 24), and every zone in that world uses it. Puzzles get harder with depth.
-- **Mosaic**: an endless grid of random 66×66 supertiles, each a gap-free tiling by 28 squares of every size.
-  - The tilings come from the bundled square-tiling-66 dataset: `public/tilings_66x66.packed.txt` and `src/vendor/tiling.js`.
-  - The start is the 6×6 zone nearest the centre of the first supertile.
-  - The HUD shows the straight-line distance to it, with 1 cell = 1 m.
-  - A zone opens when every zone along any one of its sides is solved (no diagonal rule).
-  - If that ever leaves nothing open, the frontier zone(s) closest to completing a side open, so a game can never get stuck.
+Everything lives in localStorage under `infinite-shikaku:` (`infinity:<mode>`, `survival:<mode-option>`, `records`, `prefs`, `controls-seen`). A `schema` marker guards the format: when it changes, all older keys are wiped once.
 
 **Pause** (the ⏸ button or Esc) stops the timer and shows that mode's stats, including a per-grid-size table of solved count, best and average time, plus How to play and Back to menu.
 
@@ -33,8 +51,9 @@ Each mode has its own save, so the menu offers **Continue** or **New game** per 
 - The clock runs only for the zone the player last acted in, while that zone is on screen, the zoom is playable, the tab is visible and nothing is paused.
 - Below 9 px per cell (where clue numbers are hidden) the board is not playable: the clock pauses and every drag pans.
 - Input that doesn't touch a number does nothing. A drag over exactly one number with the right area places a rectangle; a drag over a number with the wrong area (or over several numbers) shows as a short red flash that fades in a second and replaces nothing. Tapping a number removes its rectangle (with Undo) or fills a 1; taps elsewhere do nothing. Taps right after a pan, pinch or glide, and long presses, are ignored.
-- Every start or resume, in every mode, plays a 3, 2, 1, Go countdown with the board locked and all clocks frozen. First-time players see a "Getting around" controls card first (draw, undo by tapping a number, move, zoom; replayable from How to play). Confirmations use an in-game dialog, never the browser's.
-- The start zone has a gold outline and house badge; the Home button (H) glides back to it and points towards it while it is off screen.
+- Resuming plays a 3, 2, 1, Go countdown with the board locked, but only when a clock is actually running: always in Time Attack and Survival, and in Infinity only once the player has started the current zone.
+- First-time players see a short How to play (animated) and then the Controls dialog (draw, undo by tapping a number, move, zoom). Each links to the other and both are replayable. Confirmations use an in-game dialog, never the browser's.
+- In World modes the start zone has a gold outline and house badge; the Home button (H) glides back to it and points towards it while it is off screen.
 
 ## Puzzle guarantees
 
@@ -44,65 +63,3 @@ Each mode has its own save, so the menu offers **Continue** or **New game** per 
 ## Scale
 
 `tests/scale.test.ts` plays 5,000 zones in each mode: solve bookkeeping averages well under 0.1 ms, the save stays near 65 KB, and reloading takes about 40 ms. Solved zones are generated in a Web Worker and the puzzle cache is bounded, so large worlds reload without freezing.
-
-## Singles
-
-One Shikaku at a time, level after level. Each difficulty has a 10-level pattern of grid sizes that repeats forever, a little harder each time round:
-
-| Difficulty | Levels 1 to 10 |
-|---|---|
-| Easy | 6, 6, 8, 6, 6, 8, 6, 6, 8, 10 |
-| Medium | 8, 8, 10, 8, 12, 8, 8, 10, 10, 12 |
-| Hard | 10, 10, 12, 12, 15, 16, 12, 15, 16, 18 |
-| Expert | 15, 15, 16, 18, 20, 15, 16, 18, 20, 24 |
-
-Singles is a world in Infinity, Time Attack and Survival (`src/layouts/singles.ts`).
-
-## Classic: expanding world
-
-Zones grow in concentric square rings around the start, where four 6×6 zones meet. Every boundary sits on a common multiple of the two tile sizes that meet there, and every ring's width is a multiple of its tile size, so the board stays seamless:
-
-| Size | Full side | Rings | Zones | Depth |
-|---|---|---|---|---|
-| 6×6 | 72 | 6 | 144 | 1–6 |
-| 8×8 | 120 | 3 | 144 | 7–9 |
-| 10×10 | 180 | 3 | 180 | 10–12 |
-| 12×12 | 300 | 5 | 400 | 13–17 |
-| 15×15 | 480 | 6 | 624 | 18–23 |
-| 16×16 | 576 | 3 | 396 | 24–26 |
-| 18×18 | 720 | 4 | 576 | 27–30 |
-| 20×20 | 840 | 3 | 468 | 31–33 |
-| 24×24 | ∞ | ∞ | ∞ | 34+ |
-
-**Unlocking.** Within a tier, a zone opens when any neighbour is solved. Where the size steps up, a zone opens only when every zone along one side is solved **plus one diagonal zone** past that side's corner. This means you can't just drill straight outward. Locked zones show their side progress and diagonal pips.
-
-**Tools.**
-- **+ / − / Fit** controls zoom. The game never zooms on its own.
-- **Easier** jumps to the nearest open zone with a smaller grid.
-- Keyboard: `+` `-` `f` `e` `c`.
-
-## Play
-
-- Drag across cells to draw a rectangle. Tap a rectangle to remove it. Tap a `1` to fill it.
-- Drag on fog or solved areas to pan. Pinch or scroll to zoom.
-- **Continue** glides the camera to the nearest unlocked zone.
-- The game tracks the timer per zone, best, average and last solve times, farthest level and total play time.
-- Progress saves automatically to `localStorage` with one key per mode: `infinite-shikaku:classic:v4`, `infinite-shikaku:fixed:v2` and `infinite-shikaku:mosaic:v2`. It autosaves every 5 seconds, on every solve, and when the page is hidden.
-
-## Develop
-
-```sh
-npm install
-npm run dev     # local dev server
-npm test        # solver + generator tests
-npm run build   # production build in dist/
-```
-
-## How it works
-
-- `src/layouts/`: one module per mode (classic rings, fixed lattice, mosaic supertiles) behind a shared `WorldLayout` interface, plus generic neighbour and diagonal helpers.
-- `src/generator.ts`: each zone is generated deterministically from `(worldSeed, zx, zy)`. The generator makes a random rectangle partition, places clues, then checks that the solution is unique.
-- `src/solver.ts`: candidate enumeration, constraint propagation and backtracking. It counts solutions up to 2 and reports whether guessing was needed.
-- `src/gen.worker.ts` / `src/zones.ts`: zones are generated off the main thread and cached.
-- `src/render.ts`: a canvas renderer with a pan/zoom camera. Seams between solved zones fade out.
-- `src/world.ts`, `src/storage.ts`, `src/main.ts`: game state, persistence, input and the HUD.

@@ -1,5 +1,5 @@
 /**
- * Classic: concentric square rings of ever larger zones around the start.
+ * Journey (a World mode): concentric square rings of ever larger zones around the start.
  *
  * The world centre is the cell corner (0, 0), where four 6×6 zones meet.
  * A ring of s×s tiles closes seamlessly only if every boundary's full side is a
@@ -18,13 +18,13 @@
  */
 import { ZonePool, mod, zoneCenter, type WorldLayout, type Zone } from './types';
 
-export interface Tier {
+export interface Ring {
   size: number;
   /** lattice offset: tiles start at x ≡ anchor (mod size) */
   anchor: number;
-  /** outer half-side (Chebyshev radius, in cells) of this tier's square */
+  /** outer half-side (Chebyshev radius, in cells) of this ring's square */
   outer: number;
-  /** total rings in all inner tiers */
+  /** total rings in all inner sizes */
   ringsBefore: number;
 }
 
@@ -40,8 +40,8 @@ const RAW: [number, number][] = [
   [24, Infinity],
 ];
 
-export const TIERS: Tier[] = (() => {
-  const out: Tier[] = [];
+export const JOURNEY_RINGS: Ring[] = (() => {
+  const out: Ring[] = [];
   let inner = 0;
   let rings = 0;
   for (const [size, outer] of RAW) {
@@ -52,38 +52,38 @@ export const TIERS: Tier[] = (() => {
   return out;
 })();
 
-export const innerOf = (t: number) => (t === 0 ? 0 : TIERS[t - 1].outer);
+export const ringInner = (t: number) => (t === 0 ? 0 : JOURNEY_RINGS[t - 1].outer);
 
-export function tierOfPoint(x: number, y: number): number {
+export function ringOfPoint(x: number, y: number): number {
   const rad = Math.max(Math.abs(x), Math.abs(y));
-  for (let t = 0; t < TIERS.length; t++) if (rad < TIERS[t].outer) return t;
-  return TIERS.length - 1;
+  for (let t = 0; t < JOURNEY_RINGS.length; t++) if (rad < JOURNEY_RINGS[t].outer) return t;
+  return JOURNEY_RINGS.length - 1;
 }
 
-export function classicDepth(z: { x0: number; y0: number; size: number }): number {
+export function journeyDepth(z: { x0: number; y0: number; size: number }): number {
   const [cx, cy] = zoneCenter(z);
-  const t = tierOfPoint(cx, cy);
+  const t = ringOfPoint(cx, cy);
   const cheb = Math.max(Math.abs(cx), Math.abs(cy));
-  return TIERS[t].ringsBefore + Math.floor((cheb - innerOf(t)) / TIERS[t].size) + 1;
+  return JOURNEY_RINGS[t].ringsBefore + Math.floor((cheb - ringInner(t)) / JOURNEY_RINGS[t].size) + 1;
 }
 
-export function createClassicLayout(): WorldLayout {
+export function createJourneyLayout(): WorldLayout {
   const pool = new ZonePool();
   const zoneAtCell = (x: number, y: number): Zone => {
-    const t = tierOfPoint(x + 0.5, y + 0.5);
-    const { size, anchor } = TIERS[t];
+    const t = ringOfPoint(x + 0.5, y + 0.5);
+    const { size, anchor } = JOURNEY_RINGS[t];
     return pool.get(size, x - mod(x - anchor, size), y - mod(y - anchor, size));
   };
   return {
-    mode: 'classic',
+    mode: 'journey',
     origin: zoneAtCell(0, 0),
     centre: [0, 0],
     zoneAtCell,
     zonesInRect(x0, y0, x1, y1) {
       const out: Zone[] = [];
-      for (let t = 0; t < TIERS.length; t++) {
-        const { size, anchor, outer } = TIERS[t];
-        const inner = innerOf(t);
+      for (let t = 0; t < JOURNEY_RINGS.length; t++) {
+        const { size, anchor, outer } = JOURNEY_RINGS[t];
+        const inner = ringInner(t);
         if (x1 < -outer || x0 > outer || y1 < -outer || y0 > outer) continue;
         if (t > 0 && x0 >= -inner && x1 <= inner && y0 >= -inner && y1 <= inner) continue;
         const ax = Math.floor((Math.max(x0, -outer) - anchor) / size);
@@ -94,13 +94,13 @@ export function createClassicLayout(): WorldLayout {
           for (let ix = ax; ix <= bx; ix++) {
             const zx = anchor + ix * size;
             const zy = anchor + iy * size;
-            if (tierOfPoint(zx + size / 2, zy + size / 2) === t) out.push(pool.get(size, zx, zy));
+            if (ringOfPoint(zx + size / 2, zy + size / 2) === t) out.push(pool.get(size, zx, zy));
           }
       }
       return out;
     },
-    depthFor: classicDepth,
-    label: (z) => `Depth ${classicDepth(z)}`,
+    depthFor: journeyDepth,
+    label: (z) => `Depth ${journeyDepth(z)}`,
     unlockRule: 'step-diagonal',
     expansionBanner: true,
   };

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createClassicLayout, createFixedLayout, createMosaicLayout, type WorldLayout } from '../src/layouts';
+import { createClassicLayout, createFocusedLayout, createJourneyLayout, createMosaicLayout, type WorldLayout } from '../src/layouts';
 import { freshSave, sanitize, type SaveData } from '../src/storage';
 import { createTiler } from '../src/vendor/tiling';
 import { World } from '../src/world';
@@ -36,8 +36,9 @@ function simulate(L: WorldLayout, save: SaveData) {
 
 describe(`scale: ${N} solved zones`, () => {
   const cases: [string, () => [WorldLayout, SaveData]][] = [
-    ['Classic', () => [createClassicLayout(), freshSave('classic')]],
-    ['Fixed 6x6', () => [createFixedLayout(6), freshSave('fixed', 6)]],
+    ['Journey', () => [createJourneyLayout(), freshSave('journey')]],
+    ['Classic (Singles, easy)', () => [createClassicLayout('easy'), freshSave('classic', { difficulty: 'easy' })]],
+    ['Focused 6x6', () => [createFocusedLayout(6), freshSave('focused', { size: 6 })]],
     ['Mosaic', () => [createMosaicLayout(123, tiler), freshSave('mosaic')]],
   ];
   for (const [name, make] of cases) {

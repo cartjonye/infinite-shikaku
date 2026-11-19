@@ -561,9 +561,6 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 .countdown-sub { justify-self: center; background: rgba(10, 12, 18, 0.82); padding: 8px 16px; border-radius: 999px; text-shadow: none; }
 
 /* ---------- controls card ---------- */
-.coach-modal { align-items: end; }
-body.in-run .coach-modal, .coach-modal { background: rgba(6, 7, 11, 0.55); backdrop-filter: blur(2px); }
-.coach { margin-bottom: calc(8px + env(safe-area-inset-bottom)); }
 .coach h2 { text-align: center; }
 .coach-items { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
 .coach-item { background: rgba(255, 255, 255, 0.04); border-radius: 16px; padding: 8px 6px 12px; text-align: center; }
@@ -605,7 +602,6 @@ body.in-run .coach-modal, .coach-modal { background: rgba(6, 7, 11, 0.55); backd
   .cc-draw-grow { transform: none; opacity: 1; }
 }
 /* keep the board readable behind the controls card */
-body .coach-modal, body.in-run .coach-modal { backdrop-filter: none; background: rgba(6, 7, 11, 0.35); }
 .diff-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 6px 0 4px; }
 .diff-chip {
   border: 1px solid var(--line);
@@ -623,3 +619,90 @@ body .coach-modal, body.in-run .coach-modal { backdrop-filter: none; background:
 .diff-chip:hover, .diff-chip:focus-visible { border-color: var(--accent); color: var(--accent); }
 #run-world .seg-btn { padding-left: 4px; padding-right: 4px; }
 .run-panel .best-row[hidden] { display: none; }
+
+/* ---------- How to play demo ---------- */
+.guide-art { background: rgba(255, 255, 255, 0.04); border-radius: 18px; padding: 10px; margin: 4px 0 14px; }
+.guide-art svg { width: 100%; max-width: 260px; display: block; margin: 0 auto; }
+.ga-dim { opacity: 0.55; }
+.ga-grow { transform-box: fill-box; transform-origin: 0 0; animation: ga-grow 3s ease-in-out infinite; }
+.ga-move { animation: ga-move 3s ease-in-out infinite; }
+@keyframes ga-grow {
+  0%, 12% { transform: scale(0.34, 0.47); opacity: 0; fill: rgba(255, 255, 255, 0.18); stroke: rgba(255, 255, 255, 0.6); }
+  18% { opacity: 1; }
+  58% { transform: scale(1); fill: rgba(255, 255, 255, 0.18); stroke: rgba(255, 255, 255, 0.6); }
+  64%, 88% { transform: scale(1); opacity: 1; fill: rgba(142, 224, 168, 0.55); stroke: #8ee0a8; }
+  100% { transform: scale(1); opacity: 0; }
+}
+@keyframes ga-move {
+  0%, 12% { transform: translate(0, 0); opacity: 0; }
+  18% { opacity: 1; }
+  58% { transform: translate(38px, 19px); opacity: 1; }
+  70%, 100% { transform: translate(38px, 19px); opacity: 0; }
+}
+
+/* ---------- mode cards ---------- */
+.mode-grid { display: flex; flex-direction: column; gap: 14px; }
+.family-label { font-size: 12.5px; font-weight: 800; color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; margin: 0 2px 8px; }
+.family-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.mode-tile {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(26, 29, 41, 0.92);
+  padding: 8px 8px 12px;
+  text-align: center;
+  backdrop-filter: blur(8px);
+  transition: border-color 0.15s, transform 0.15s;
+}
+.mode-tile:hover, .mode-tile:focus-visible { border-color: rgba(255, 207, 110, 0.5); }
+.mode-tile:active { transform: scale(0.98); }
+.mode-tile[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.mode-tile svg { width: 100%; max-width: 150px; height: auto; display: block; margin: 0 auto; overflow: hidden; border-radius: 12px; background: rgba(255, 255, 255, 0.03); }
+.mode-tile-name { font-weight: 900; font-size: 17px; margin-top: 8px; }
+.mode-tile-hook { font-size: 12.5px; color: #c4c8d6; margin-top: 2px; line-height: 1.3; }
+.mode-tile .saved-dot { position: absolute; top: 10px; right: 10px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgba(255, 207, 110, 0.18); }
+.mode-tile .saved-dot[hidden] { display: none; }
+
+.ma-a { fill: #9fc7f0; }
+.ma-b { fill: #f4b6a6; }
+.ma-c { fill: #a8dcc0; }
+.ma-slide { animation: ma-slide 4s ease-in-out infinite; }
+.ma-fill1, .ma-fill2, .ma-fill3 { opacity: 0; animation: ma-fill 4s ease-in-out infinite; }
+.ma-fill2 { animation-delay: 0.35s; }
+.ma-fill3 { animation-delay: 0.7s; }
+@keyframes ma-slide { 0%, 55% { transform: translateX(0); } 75%, 100% { transform: translateX(-90px); } }
+@keyframes ma-fill { 0%, 5% { opacity: 0; } 15%, 100% { opacity: 1; } }
+.ma-pop1, .ma-pop2, .ma-pop3, .ma-pop4, .ma-pop5 { opacity: 0; animation: ma-pop 4s ease-out infinite; }
+.ma-pop2 { animation-delay: 0.4s; }
+.ma-pop3 { animation-delay: 0.8s; }
+.ma-pop4 { animation-delay: 1.2s; }
+.ma-pop5 { animation-delay: 1.6s; }
+@keyframes ma-pop { 0% { opacity: 0; } 8%, 70% { opacity: 1; } 85%, 100% { opacity: 0; } }
+.ma-ring { fill: #2a3042; }
+.ma-core { fill: #f7d58b; }
+.ma-ring1, .ma-ring2 { transform-box: view-box; transform-origin: 60px 45px; animation: ma-grow 4s ease-out infinite; }
+.ma-ring1 .ma-ring { fill: #9fc7f0; }
+.ma-ring2 .ma-ring { fill: #c9b3ef; }
+.ma-ring2 { animation-delay: 0.6s; }
+@keyframes ma-grow { 0% { opacity: 0; transform: scale(0.6); } 20%, 75% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }
+.ma-tile { fill: #2a3042; animation: ma-light 3s ease-in-out infinite; }
+@keyframes ma-light { 0%, 100% { fill: #2a3042; } 20%, 45% { fill: #f4b6a6; } }
+.ma-t2 { animation-name: ma-light2; }
+.ma-t3 { animation-name: ma-light3; }
+@keyframes ma-light2 { 0%, 100% { fill: #2a3042; } 20%, 45% { fill: #a8dcc0; } }
+@keyframes ma-light3 { 0%, 100% { fill: #2a3042; } 20%, 45% { fill: #9fc7f0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ma-slide, .ma-fill1, .ma-fill2, .ma-fill3, .ma-pop1, .ma-pop2, .ma-pop3, .ma-pop4, .ma-pop5, .ma-ring1, .ma-ring2, .ma-tile, .ga-grow, .ga-move { animation: none; opacity: 1; }
+}
+
+/* ---------- mode sheet ---------- */
+.mode-sheet-art { max-width: 220px; margin: 0 auto 10px; }
+.mode-sheet-art svg { width: 100%; display: block; border-radius: 14px; background: rgba(255, 255, 255, 0.04); }
+.mode-sheet .sheet-pills { justify-content: center; }
+.mode-sheet h2, .mode-sheet .mode-desc { text-align: center; }
+.mode-option { margin: 12px 0 4px; }
+.mode-option[hidden] { display: none; }
+.coach-modal .sheet { margin-bottom: 0; }
+/* the guide and controls are full centred dialogs */
+.guide h2, .coach h2 { text-align: center; }
+.guide p { text-align: center; }

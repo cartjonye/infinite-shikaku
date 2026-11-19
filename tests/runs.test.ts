@@ -54,21 +54,22 @@ describe('runs', () => {
 
   it('starts Survival at 3x the first grid\'s first bonus', () => {
     for (const [n, s] of Object.entries(SURVIVAL_START_S)) expect(s).toBe(3 * SURVIVAL_BONUS_S[Number(n)][0]);
-    expect(newRun('survival', 'classic').clockMs).toBe(90_000);
+    expect(newRun('survival', 'journey').clockMs).toBe(90_000);
     expect(newRun('survival', 'mosaic').clockMs).toBe(90_000);
-    expect(newRun('survival', 'fixed', 24).clockMs).toBe(720_000);
-    expect(newRun('survival', 'fixed', 12).clockMs).toBe(252_000);
-    expect(newRun('survival', 'singles', undefined, undefined, 'medium').clockMs).toBe(135_000);
-    expect(newRun('survival', 'singles', undefined, undefined, 'expert').clockMs).toBe(360_000);
-    expect(recordKey('survival', 'singles', undefined, undefined, 'hard')).toBe('sv:singles-hard');
+    expect(newRun('survival', 'classic', { difficulty: 'easy' }).clockMs).toBe(90_000);
+    expect(newRun('survival', 'focused', { size: 24 }).clockMs).toBe(720_000);
+    expect(newRun('survival', 'focused', { size: 12 }).clockMs).toBe(252_000);
+    expect(newRun('survival', 'classic', { difficulty: 'medium' }).clockMs).toBe(135_000);
+    expect(newRun('survival', 'classic', { difficulty: 'expert' }).clockMs).toBe(360_000);
+    expect(recordKey('survival', 'classic', { difficulty: 'hard' })).toBe('sv:classic-hard');
   });
 
   it('starts runs with the right clocks and credits solves', () => {
-    const ta = newRun('timeattack', 'mosaic', undefined, 2);
+    const ta = newRun('timeattack', 'mosaic', {}, 2);
     expect(ta.clockMs).toBe(120_000);
     expect(creditSolve(ta, 8)).toBe(0);
     expect(ta.area).toBe(64);
-    const sv = newRun('survival', 'fixed', 10);
+    const sv = newRun('survival', 'focused', { size: 10 });
     expect(sv.clockMs).toBe(198_000);
     expect(creditSolve(sv, 10)).toBe(66_000);
     expect(sv.clockMs).toBe(264_000);
@@ -76,9 +77,10 @@ describe('runs', () => {
   });
 
   it('builds stable record keys', () => {
-    expect(recordKey('timeattack', 'mosaic', undefined, 5)).toBe('ta:mosaic:5');
-    expect(recordKey('timeattack', 'fixed', 12, 2)).toBe('ta:fixed-12:2');
-    expect(recordKey('survival', 'classic')).toBe('sv:classic');
+    expect(recordKey('timeattack', 'mosaic', {}, 5)).toBe('ta:mosaic:5');
+    expect(recordKey('timeattack', 'focused', { size: 12 }, 2)).toBe('ta:focused-12:2');
+    expect(recordKey('survival', 'journey')).toBe('sv:journey');
+    expect(recordKey('survival', 'classic', { difficulty: 'expert' })).toBe('sv:classic-expert');
   });
 
   it('ranks Time Attack by area then zones, Survival by time then area', () => {
@@ -90,45 +92,47 @@ describe('runs', () => {
   });
 
   it('keeps only better runs as personal bests', () => {
-    const a = newRun('timeattack', 'mosaic', undefined, 5);
+    const a = newRun('timeattack', 'mosaic', {}, 5);
     creditSolve(a, 12);
     expect(submitRecord(a)).toBe(true);
-    const worse = newRun('timeattack', 'mosaic', undefined, 5);
+    const worse = newRun('timeattack', 'mosaic', {}, 5);
     creditSolve(worse, 6);
     expect(submitRecord(worse)).toBe(false);
     expect(getRecord('ta:mosaic:5')!.area).toBe(144);
     // other lengths are separate
     expect(submitRecord(worse)).toBe(false);
-    const other = newRun('timeattack', 'mosaic', undefined, 2);
+    const other = newRun('timeattack', 'mosaic', {}, 2);
     creditSolve(other, 6);
     expect(submitRecord(other)).toBe(true);
   });
 
   it('saves and clears a Survival run per world', () => {
-    const run = newRun('survival', 'fixed', 8);
-    const save = freshSave('fixed', 8);
+    const run = newRun('survival', 'focused', { size: 8 });
+    const save = freshSave('focused', { size: 8 });
     writeSurvival(save, run);
-    expect(loadSurvival('fixed', 8)!.run.clockMs).toBe(135_000);
-    expect(loadSurvival('fixed', 10)).toBeNull();
-    clearSurvival('fixed', 8);
-    expect(loadSurvival('fixed', 8)).toBeNull();
+    expect(loadSurvival('focused', { size: 8 })!.run.clockMs).toBe(135_000);
+    expect(loadSurvival('focused', { size: 10 })).toBeNull();
+    expect(loadSurvival('mosaic')).toBeNull();
+    clearSurvival('focused', { size: 8 });
+    expect(loadSurvival('focused', { size: 8 })).toBeNull();
   });
 });
 
-describe('Singles Survival runs from older versions', () => {
-  it('are converted to level keys with the run itself kept', () => {
+describe('storage schema', () => {
+  it('wipes every key from an older schema exactly once', async () => {
     mem.clear();
-    const run = newRun('survival', 'singles', undefined, undefined, 'easy');
-    run.clockMs = 77_000;
-    run.zones = 3;
-    const save = freshSave('singles', undefined, 'easy');
-    save.solved = ['6@0,-3', '6@10,-3', '8@20,-4']; // version 2 (centred) positions of levels 1-3
-    mem.set('infinite-shikaku:survival:singles-easy:v2', JSON.stringify({ v: 1, save, run }));
-    const slot = loadSurvival('singles', undefined, 'easy')!;
-    expect(slot.save.solved).toEqual(['L1', 'L2', 'L3']);
-    expect(slot.run.clockMs).toBe(77_000);
-    expect(slot.run.zones).toBe(3);
-    expect(mem.has('infinite-shikaku:survival:singles-easy:v2')).toBe(false);
-    expect(mem.has('infinite-shikaku:survival:singles-easy:v3')).toBe(true);
+    mem.set('infinite-shikaku:classic:v4', '{}');
+    mem.set('infinite-shikaku:singles:v3', '{}');
+    mem.set('infinite-shikaku:records:v1', '{}');
+    mem.set('someone-else', 'keep');
+    (localStorage as any).key = (i: number) => [...mem.keys()][i] ?? null;
+    Object.defineProperty(localStorage, 'length', { get: () => mem.size, configurable: true });
+    const { ensureSchema, SCHEMA } = await import('../src/storage');
+    expect(ensureSchema()).toBe(true);
+    expect([...mem.keys()].sort()).toEqual(['infinite-shikaku:schema', 'someone-else']);
+    expect(mem.get('infinite-shikaku:schema')).toBe(String(SCHEMA));
+    mem.set('infinite-shikaku:infinity:mosaic', '{}');
+    expect(ensureSchema()).toBe(false);
+    expect(mem.has('infinite-shikaku:infinity:mosaic')).toBe(true);
   });
 });

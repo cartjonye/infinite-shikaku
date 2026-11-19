@@ -1,14 +1,17 @@
 /**
- * Singles: one Shikaku at a time, level after level.
+ * The Singles family: one Shikaku at a time, level after level.
  *
- * Each difficulty has a 10-level pattern of grid sizes that repeats forever; every
- * level is a little harder than the one before. Levels sit in a row along the x axis,
- * centred on the same line (y = 0) with a gap between them, so moving from one level
- * to the next is a straight horizontal slide even when the sizes differ. Every level
- * keeps its own zone key, but only the current level is drawn (plus the previous one
- * while the slide is running).
+ * - Classic: a 10-level pattern of grid sizes per difficulty, repeating forever.
+ * - Focused: every level is the grid size the player picked.
+ *
+ * Every level is a little harder than the one before. Levels sit in a row along the
+ * x axis, centred on the same line with a gap between them, so moving to the next level
+ * is a straight horizontal slide. Positions are purely visual: zone keys ("L7") and
+ * puzzle seeds come from the level number. Only the current level is drawn, plus the
+ * previous one while a slide runs (fading out as the next one fades in).
  */
-import { ZonePool, type WorldLayout, type Zone } from './types';
+import type { ModeId, WorldLayout, Zone } from './types';
+import { ZonePool } from './types';
 
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
 export const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard', 'expert'];
@@ -19,62 +22,52 @@ export const DIFFICULTY_NAMES: Record<Difficulty, string> = {
   expert: 'Expert',
 };
 
-/** Grid size of levels 1 to 10; the pattern repeats from level 11. */
-export const SINGLES_PATTERNS: Record<Difficulty, number[]> = {
+/** Classic: grid size of levels 1 to 10; the pattern repeats from level 11. */
+export const CLASSIC_PATTERNS: Record<Difficulty, number[]> = {
   easy: [6, 6, 8, 6, 6, 8, 6, 6, 8, 10],
   medium: [8, 8, 10, 8, 12, 8, 8, 10, 10, 12],
   hard: [10, 10, 12, 12, 15, 16, 12, 15, 16, 18],
   expert: [15, 15, 16, 18, 20, 15, 16, 18, 20, 24],
 };
+/** Classic: puzzle depth of level 1; each later level is one step deeper. */
+const CLASSIC_BASE_DEPTH: Record<Difficulty, number> = { easy: 1, medium: 8, hard: 16, expert: 26 };
 
-/** Puzzle depth of level 1; each later level is one step deeper. */
-const BASE_DEPTH: Record<Difficulty, number> = { easy: 1, medium: 8, hard: 16, expert: 26 };
+/** Focused: the grid sizes a player can pick. */
+export const FOCUSED_SIZES = [6, 8, 10, 12, 15, 16, 18, 20, 24];
+
+export const classicLevelSize = (d: Difficulty, level: number) => CLASSIC_PATTERNS[d][(level - 1) % 10];
+
 /** cells between levels on the board; purely visual (keys and seeds don't depend on it) */
 const GAP = 4;
 
-export const singlesSize = (d: Difficulty, level: number) => SINGLES_PATTERNS[d][(level - 1) % 10];
-
-/** Saved key of a level. Keys and puzzle seeds use the level number, never the position. */
+/** Saved key of a level. */
 export const levelKey = (level: number) => `L${level}`;
 const parseLevelKey = (key: string) => {
   const m = /^L(\d+)$/.exec(key);
   return m ? Number(m[1]) : 0;
 };
 
-/**
- * Level number of a zone key from an older Singles save, which named levels by
- * position ("size@x,y"). Version 1 put levels top-aligned, version 2 centred them;
- * both used a 4-cell gap. Returns 0 if the key isn't a level.
- */
-export function legacyLevelOf(d: Difficulty, key: string, version: 1 | 2): number {
-  const m = /^(\d+)@(-?\d+),(-?\d+)$/.exec(key);
-  if (!m) return 0;
-  const [size, x0, y0] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  let x = 0;
-  for (let n = 1; x <= x0; n++) {
-    const s = singlesSize(d, n);
-    if (x === x0) return s === size && y0 === (version === 1 ? 0 : -Math.floor(s / 2)) ? n : 0;
-    x += s + 4;
-  }
-  return 0;
-}
-
 export interface SinglesLayout extends WorldLayout {
-  difficulty: Difficulty;
+  sizeOf(level: number): number;
   /** 1-based level of a zone, or 0 for cells between levels */
   levelOf(z: Zone): number;
   levelZone(level: number): Zone;
-  /**
-   * Which level is drawn. With `keepPrevious`, the level that was current stays drawn
-   * too, so a level change can slide the solved puzzle out while the next one slides in.
-   */
-  setCurrent(level: number, keepPrevious?: boolean): void;
-  /** stop drawing the previous level (call when the slide has finished) */
-  dropPrevious(): void;
   current(): number;
+  /** show this level, without a transition */
+  setCurrent(level: number): void;
+  /** slide to this level: the current one fades out as the new one fades in */
+  slideTo(level: number, t0: number, dur: number): void;
+  /** stop drawing the previous level once the slide has finished */
+  endSlide(): void;
 }
 
-export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
+interface SinglesSpec {
+  mode: ModeId;
+  sizeOf(level: number): number;
+  depthOf(level: number): number;
+}
+
+function createSinglesLayout(spec: SinglesSpec): SinglesLayout {
   const voids = new ZonePool();
   const starts: number[] = [0]; // starts[i] = x0 of level i + 1
   const zones: Zone[] = [];
@@ -82,9 +75,8 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
   const ensure = (level: number) => {
     while (zones.length < level) {
       const n = zones.length + 1;
-      const size = singlesSize(difficulty, n);
+      const size = spec.sizeOf(n);
       const x0 = starts[n - 1];
-      // positions are only for drawing; the key and the puzzle seed come from the level
       const z: Zone = { key: levelKey(n), x0, y0: -Math.floor(size / 2), size, seedId: n };
       zones.push(z);
       levelByKey.set(z.key, n);
@@ -96,11 +88,10 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
     return zones[level - 1];
   };
   let current = 1;
-  let previous = 0;
+  let slide: { from: number; t0: number; dur: number } | null = null;
 
   const zoneAtCell = (x: number, y: number): Zone => {
     if (x >= 0) {
-      // levels only grow to the right; find the one whose x-range holds this cell
       while (starts[starts.length - 1] <= x) ensure(zones.length + 1);
       let lo = 0;
       let hi = zones.length - 1;
@@ -115,10 +106,11 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
     // between levels: an inert cell that is never drawn or opened
     return voids.get(1, x, y);
   };
+  const clamp = (v: number) => Math.min(1, Math.max(0, v));
 
   return {
-    mode: 'singles',
-    difficulty,
+    mode: spec.mode,
+    sizeOf: spec.sizeOf,
     origin: levelZone(1),
     get centre(): [number, number] {
       const z = levelZone(current);
@@ -126,10 +118,10 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
     },
     zoneAtCell,
     zonesInRect(x0, y0, x1, y1) {
-      const shown = previous ? [levelZone(previous), levelZone(current)] : [levelZone(current)];
+      const shown = slide ? [levelZone(slide.from), levelZone(current)] : [levelZone(current)];
       return shown.filter((z) => !(z.x0 + z.size < x0 || z.x0 > x1 || z.y0 + z.size < y0 || z.y0 > y1));
     },
-    depthFor: (z) => BASE_DEPTH[difficulty] + Math.max(1, levelByKey.get(z.key) ?? 1) - 1,
+    depthFor: (z) => spec.depthOf(Math.max(1, levelByKey.get(z.key) ?? 1)),
     label: (z) => `Level ${levelByKey.get(z.key) ?? 1}`,
     expansionBanner: false,
     unlockRule: 'sequence',
@@ -141,20 +133,49 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
       const n = levelByKey.get(z.key);
       return n && n > 1 ? levelZone(n - 1) : null;
     },
-    levelOf: (z) => levelByKey.get(z.key) ?? 0,
     zoneByKey: (key) => {
       const n = parseLevelKey(key);
       return n > 0 ? levelZone(n) : null;
     },
+    // the finished level fades out over the second half of the slide; the next one
+    // fades in over the first half, so nothing pops in or out on wide screens
+    alphaFor(z, now) {
+      if (!slide) return 1;
+      const t = (now - slide.t0) / slide.dur;
+      const n = levelByKey.get(z.key);
+      if (n === slide.from) return clamp(2 - 2 * t);
+      if (n === current) return clamp(2 * t);
+      return 1;
+    },
+    animating: () => !!slide,
+    levelOf: (z) => levelByKey.get(z.key) ?? 0,
     levelZone,
-    setCurrent(level, keepPrevious = false) {
+    current: () => current,
+    setCurrent(level) {
+      current = Math.max(1, level);
+      slide = null;
+    },
+    slideTo(level, t0, dur) {
       const next = Math.max(1, level);
-      previous = keepPrevious && next !== current ? current : 0;
+      slide = next !== current ? { from: current, t0, dur } : null;
       current = next;
     },
-    dropPrevious() {
-      previous = 0;
+    endSlide() {
+      slide = null;
     },
-    current: () => current,
   };
+}
+
+/** Singles Classic: grid sizes follow the difficulty's 10-level pattern. */
+export function createClassicLayout(difficulty: Difficulty): SinglesLayout {
+  return createSinglesLayout({
+    mode: 'classic',
+    sizeOf: (n) => classicLevelSize(difficulty, n),
+    depthOf: (n) => CLASSIC_BASE_DEPTH[difficulty] + n - 1,
+  });
+}
+
+/** Singles Focused: every level is the chosen size, each a little harder. */
+export function createFocusedLayout(size: number): SinglesLayout {
+  return createSinglesLayout({ mode: 'focused', sizeOf: () => size, depthOf: (n) => n });
 }

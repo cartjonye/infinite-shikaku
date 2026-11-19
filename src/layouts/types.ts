@@ -1,4 +1,19 @@
-export type ModeId = 'classic' | 'fixed' | 'mosaic' | 'singles';
+/** Singles: Classic, Focused (one Shikaku at a time). World: Journey, Mosaic (a map). */
+export type ModeId = 'classic' | 'focused' | 'journey' | 'mosaic';
+export type ModeFamily = 'singles' | 'world';
+export const MODE_FAMILY: Record<ModeId, ModeFamily> = {
+  classic: 'singles',
+  focused: 'singles',
+  journey: 'world',
+  mosaic: 'world',
+};
+export const MODE_NAMES: Record<ModeId, string> = {
+  classic: 'Classic',
+  focused: 'Focused',
+  journey: 'Journey',
+  mosaic: 'Mosaic',
+};
+export const isSinglesMode = (m: ModeId) => MODE_FAMILY[m] === 'singles';
 
 export interface Zone {
   key: string;
@@ -35,7 +50,7 @@ export interface WorldLayout {
   /**
    * How a locked zone opens:
    * - 'step-diagonal': any neighbour on a side; on a side bordering smaller zones,
-   *   the whole side plus one diagonal zone (Classic, Fixed)
+   *   the whole side plus one diagonal zone (Journey)
    * - 'full-side': every zone along any one side solved, no diagonal (Mosaic)
    * - 'sequence': each zone opens when the one before it is solved (Singles)
    */
@@ -45,6 +60,10 @@ export interface WorldLayout {
   prev?(z: Zone): Zone | null;
   /** resolve a saved zone key, for layouts whose keys aren't "size@x,y" */
   zoneByKey?(key: string): Zone | null;
+  /** opacity to draw a zone with (Singles level transitions); 1 when absent */
+  alphaFor?(z: Zone, now: number): number;
+  /** true while the layout itself animates (keeps frames coming) */
+  animating?(): boolean;
 }
 
 export const zoneKey = (size: number, x0: number, y0: number) => `${size}@${x0},${y0}`;

@@ -2,30 +2,22 @@
  * localStorage persistence, one save per game mode.
  * Every access is guarded so the game still runs (without saving) when storage is unavailable.
  */
-import { legacyLevelOf, levelKey, zoneByKey, type Difficulty, type ModeId, type WorldLayout } from './layouts';
+import { zoneByKey, type Difficulty, type ModeId, type WorldLayout } from './layouts';
 import type { Rect } from './types';
 
-export const SAVE_VERSION = 4;
-const KEYS: Record<ModeId, string> = {
-  classic: 'infinite-shikaku:classic:v4',
-  fixed: 'infinite-shikaku:fixed:v2',
-  mosaic: 'infinite-shikaku:mosaic:v2',
-  singles: 'infinite-shikaku:singles:v3',
-};
-const LAST_MODE_KEY = 'infinite-shikaku:last-mode';
-// Saves made before the puzzle generator changed no longer match their worlds.
-const LEGACY_KEYS = [
-  'infinite-shikaku:v1',
-  'infinite-shikaku:v2',
-  'infinite-shikaku:v3',
-  'infinite-shikaku:fixed:v1',
-  'infinite-shikaku:mosaic:v1',
-];
-/** Older Singles saves named levels by position; they are converted, not deleted. */
-const SINGLES_OLD: [string, 1 | 2][] = [
-  ['infinite-shikaku:singles:v2', 2],
-  ['infinite-shikaku:singles:v1', 1],
-];
+/**
+ * Storage schema. Every key the game writes starts with PREFIX. When the stored schema
+ * differs from SCHEMA, all of them are wiped once (saves, run slots, records, prefs,
+ * the controls card flag): older data uses mode names and layouts that no longer exist.
+ */
+export const PREFIX = 'infinite-shikaku:';
+export const SCHEMA = 5;
+const SCHEMA_KEY = `${PREFIX}schema`;
+export const SAVE_VERSION = SCHEMA;
+
+/** One Infinity save per mode. */
+const saveKey = (mode: ModeId) => `${PREFIX}infinity:${mode}`;
+const LAST_MODE_KEY = `${PREFIX}last-mode`;
 
 export interface SizeStats {
   solved: number;
@@ -39,7 +31,7 @@ export interface Stats {
   totalSolveMs: number;
   /** per grid size (key = side length) */
   bySize: Record<string, SizeStats>;
-  /** deepest depth reached (Classic, Fixed) */
+  /** deepest depth reached (Journey) */
   deepest: number;
   /** farthest straight-line distance from the centre, in cells / metres (Mosaic) */
   farthestM: number;
@@ -49,9 +41,9 @@ export interface Stats {
 export interface SaveData {
   v: number;
   mode: ModeId;
-  /** Fixed mode only: the chosen tile size */
-  tileSize?: number;
-  /** Singles only: the chosen difficulty */
+  /** Focused only: the chosen grid size */
+  size?: number;
+  /** Classic only: the chosen difficulty */
   difficulty?: Difficulty;
   seed: number;
   solved: string[];
@@ -82,12 +74,18 @@ export const emptyStats = (): Stats => ({
   totalPlayMs: 0,
 });
 
-export function freshSave(mode: ModeId, tileSize?: number, difficulty?: Difficulty): SaveData {
+/** Mode options: the difficulty for Classic, the grid size for Focused. */
+export interface ModeOptions {
+  difficulty?: Difficulty;
+  size?: number;
+}
+
+export function freshSave(mode: ModeId, opts: ModeOptions = {}): SaveData {
   return {
     v: SAVE_VERSION,
     mode,
-    tileSize: mode === 'fixed' ? tileSize : undefined,
-    difficulty: mode === 'singles' ? (difficulty ?? 'easy') : undefined,
+    size: mode === 'focused' ? (opts.size ?? 8) : undefined,
+    difficulty: mode === 'classic' ? (opts.difficulty ?? 'easy') : undefined,
     seed: (Math.random() * 2 ** 32) >>> 0,
     solved: [],
     rects: {},
@@ -123,64 +121,38 @@ function isValid(d: any, mode: ModeId): boolean {
   return (
     d &&
     d.v === SAVE_VERSION &&
-    (d.mode ?? 'classic') === mode &&
+    d.mode === mode &&
     typeof d.seed === 'number' &&
     Array.isArray(d.solved) &&
     typeof d.rects === 'object' &&
     typeof d.timers === 'object' &&
     typeof d.stats === 'object' &&
-    (mode !== 'fixed' || typeof d.tileSize === 'number') &&
-    (mode !== 'singles' || typeof d.difficulty === 'string')
+    (mode !== 'focused' || typeof d.size === 'number') &&
+    (mode !== 'classic' || typeof d.difficulty === 'string')
   );
 }
 
-// Saves from the original 8/12/16/20 layouts are gone for good.
-LEGACY_KEYS.forEach(remove);
-
-/**
- * Convert a Singles save from the old position-based keys to level keys. Solved
- * levels, stats, play time and difficulty carry over; work in progress on the current
- * level is dropped, because its puzzle changes once with level-based seeding.
- */
-export function migrateSinglesSave(d: any, version: 1 | 2): SaveData | null {
-  if (!isValid(d, 'singles')) return null;
-  const diff = d.difficulty as Difficulty;
-  const levels = new Set<number>();
-  for (const k of d.solved) {
-    const n = legacyLevelOf(diff, k, version);
-    if (n > 0) levels.add(n);
+/** Wipe every key from an older schema, once. Returns true if anything was wiped. */
+export function ensureSchema(): boolean {
+  try {
+    if (localStorage.getItem(SCHEMA_KEY) === String(SCHEMA)) return false;
+    const old: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(PREFIX)) old.push(k);
+    }
+    old.forEach(remove);
+    localStorage.setItem(SCHEMA_KEY, String(SCHEMA));
+    return old.length > 0;
+  } catch {
+    return false;
   }
-  // levels are solved in order, so keep the unbroken run from level 1
-  let top = 0;
-  while (levels.has(top + 1)) top++;
-  return {
-    ...freshSave('singles', undefined, diff),
-    ...d,
-    mode: 'singles',
-    solved: Array.from({ length: top }, (_, i) => levelKey(i + 1)),
-    rects: {},
-    timers: {},
-    active: null,
-    opened: [],
-    custom: {},
-    cam: null,
-    stats: { ...emptyStats(), ...d.stats },
-  };
 }
-
-function loadOldSingles(): SaveData | null {
-  for (const [key, version] of SINGLES_OLD) {
-    const d = migrateSinglesSave(read(key), version);
-    if (!d) continue;
-    if (writeSave(d)) SINGLES_OLD.forEach(([k]) => remove(k));
-    return d;
-  }
-  return null;
-}
+ensureSchema();
 
 export function loadSave(mode: ModeId): SaveData | null {
-  const d = read(KEYS[mode]);
-  if (!isValid(d, mode)) return mode === 'singles' ? loadOldSingles() : null;
+  const d = read(saveKey(mode));
+  if (!isValid(d, mode)) return null;
   return { ...freshSave(mode), ...d, mode, stats: { ...emptyStats(), ...d.stats } };
 }
 
@@ -200,7 +172,7 @@ export function sanitize(d: SaveData, L: WorldLayout): SaveData {
 export function writeSave(d: SaveData): boolean {
   try {
     d.lastPlayed = Date.now();
-    localStorage.setItem(KEYS[d.mode], JSON.stringify(d));
+    localStorage.setItem(saveKey(d.mode), JSON.stringify(d));
     localStorage.setItem(LAST_MODE_KEY, d.mode);
     return true;
   } catch {
@@ -209,13 +181,13 @@ export function writeSave(d: SaveData): boolean {
 }
 
 export function clearSave(mode: ModeId) {
-  remove(KEYS[mode]);
+  remove(saveKey(mode));
 }
 
 export function lastMode(): ModeId | null {
   try {
     const m = localStorage.getItem(LAST_MODE_KEY);
-    return m === 'classic' || m === 'fixed' || m === 'mosaic' || m === 'singles' ? m : null;
+    return m === 'classic' || m === 'focused' || m === 'journey' || m === 'mosaic' ? m : null;
   } catch {
     return null;
   }
@@ -227,7 +199,7 @@ export interface SaveSummary {
   farthestM: number;
   totalPlayMs: number;
   lastPlayed: number;
-  tileSize?: number;
+  size?: number;
   difficulty?: Difficulty;
 }
 
@@ -240,7 +212,7 @@ export function summarize(mode: ModeId): SaveSummary | null {
     farthestM: d.stats.farthestM,
     totalPlayMs: d.stats.totalPlayMs,
     lastPlayed: d.lastPlayed,
-    tileSize: d.tileSize,
+    size: d.size,
     difficulty: d.difficulty,
   };
 }

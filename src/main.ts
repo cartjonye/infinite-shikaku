@@ -1,12 +1,14 @@
 import './style.css';
+import { controlArt, guideArt, modeArt, type ControlKind } from './art';
 import {
   DIFFICULTIES,
   DIFFICULTY_NAMES,
-  FIXED_SIZES,
-  SINGLES_PATTERNS,
+  FOCUSED_SIZES,
+  MODE_FAMILY,
+  MODE_NAMES,
   createClassicLayout,
-  createSinglesLayout,
-  createFixedLayout,
+  createFocusedLayout,
+  createJourneyLayout,
   createMosaicLayout,
   edgeNeighbours,
   formatMetres,
@@ -20,7 +22,17 @@ import {
   type Zone,
 } from './layouts';
 import { MIN_PLAY_ZOOM, Renderer, type Camera, type Preview } from './render';
-import { clearSave, freshSave, loadSave, sanitize, summarize, writeSave, type SaveData } from './storage';
+import {
+  PREFIX,
+  clearSave,
+  freshSave,
+  loadSave,
+  sanitize,
+  summarize,
+  writeSave,
+  type ModeOptions,
+  type SaveData,
+} from './storage';
 import { rectsOverlap, type Rect } from './types';
 import {
   TA_MINUTES,
@@ -31,32 +43,54 @@ import {
   loadSurvival,
   newRun,
   recordKey,
+  runOptions,
   savePrefs,
   submitRecord,
   survivalBonusMs,
   survivalStartMs,
-  SURVIVAL_START_MS,
   writeSurvival,
+  type RunChoice,
   type RunState,
   type RunStyle,
 } from './runs';
 import { World } from './world';
 import { ZoneCache } from './zones';
 
+/** The three ways to play, shown on the main menu. */
+type PlayStyle = 'infinity' | RunStyle;
+/** Mode cards are laid out by family: Singles on top, World below. */
+const MODE_ROWS: { family: 'singles' | 'world'; label: string; modes: ModeId[] }[] = [
+  { family: 'singles', label: 'Singles', modes: ['classic', 'focused'] },
+  { family: 'world', label: 'World', modes: ['journey', 'mosaic'] },
+];
+const MODE_HOOKS: Record<ModeId, string> = {
+  classic: 'One Shikaku at a time, level after level',
+  focused: 'Your favourite size, one after another',
+  journey: 'Grids grow as you travel outward',
+  mosaic: 'Every size, all mixed up',
+};
+const MODE_DESCRIPTIONS: Record<ModeId, string> = {
+  classic: 'One Shikaku at a time, level after level. Pick your challenge and climb.',
+  focused: 'Pick your favourite grid and play it one after another. Quick 6×6 breaks or epic 24×24 marathons.',
+  journey: 'Start small and push outward. Every step brings bigger grids and tougher Shikaku.',
+  mosaic: 'Small and huge Shikaku side by side, in a world no one else will ever see. How far from home can you go?',
+};
+const isSingles = (L: WorldLayout): L is SinglesLayout => MODE_FAMILY[L.mode] === 'singles';
+
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
 const canvas = $<HTMLCanvasElement>('#board');
 const renderer = new Renderer(canvas);
 
-// The menu shows over an idle Classic backdrop that is never saved.
+// The menu shows over an idle Journey backdrop that is never saved.
 let inGame = false;
-/** the Time Attack or Survival run in progress (null in Endless) */
+/** the Time Attack or Survival run in progress (null in Infinity) */
 let run: RunState | null = null;
 let runPhase: 'live' | 'over' | null = null;
 /** true while "3, 2, 1, Go" plays: the board is locked and every clock is frozen */
 let countdownActive = false;
-let layout: WorldLayout = createClassicLayout();
-let save: SaveData = { ...freshSave('classic'), seed: 20261116 };
+let layout: WorldLayout = createJourneyLayout();
+let save: SaveData = { ...freshSave('journey'), seed: 20261116 };
 let world = new World(layout, save);
 let dirty = true;
 let zones = new ZoneCache(save.seed, layout, () => (dirty = true));
@@ -95,7 +129,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) saveNow();
   lastTick = performance.now();
   // coming back to a live run: give the player a moment before the clock moves again
-  if (!document.hidden && inGame && runPhase !== 'over' && !anyModalOpen()) startCountdown('Welcome back');
+  if (!document.hidden && inGame && runPhase !== 'over' && !anyModalOpen() && clockRunning()) startCountdown('Welcome back');
 });
 window.addEventListener('pagehide', saveNow);
 
@@ -621,8 +655,7 @@ function updateHud() {
 // ---------- modals: help, pause ----------
 const pauseModal = $('#pause-modal');
 const helpModal = $('#help-modal');
-const sizeModal = $('#size-modal');
-const diffModal = $('#diff-modal');
+const modeSheet = $('#mode-sheet');
 const runPauseModal = $('#run-pause-modal');
 const resultsModal = $('#results-modal');
 const coachModal = $('#coach-modal');
@@ -670,8 +703,8 @@ window.addEventListener(
   true,
 );
 
-// ---------- controls card (shown once, replayable from How to play) ----------
-const COACH_KEY = 'infinite-shikaku:coach:v1';
+// ---------- How to play & controls (shown once, replayable) ----------
+const COACH_KEY = `${PREFIX}controls-seen`;
 function coachSeen() {
   try {
     return localStorage.getItem(COACH_KEY) === '1';
@@ -680,52 +713,23 @@ function coachSeen() {
   }
 }
 const touchFirst = () => window.matchMedia?.('(pointer: coarse)').matches ?? false;
-function coachArt(kind: 'draw' | 'tap' | 'pan' | 'zoom', touch: boolean): string {
-  const cells = (cols: number, rows: number, x0: number, y0: number, size: number, gap: number, num?: [number, number, string]) => {
-    let out = '';
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < cols; c++)
-        out += `<rect x="${x0 + c * (size + gap)}" y="${y0 + r * (size + gap)}" width="${size}" height="${size}" rx="4" class="cc-cell"/>`;
-    if (num) out += `<text x="${x0 + num[0] * (size + gap) + size / 2}" y="${y0 + num[1] * (size + gap) + size / 2 + 5}" class="cc-num">${num[2]}</text>`;
-    return out;
-  };
-  const finger = (cls: string, x: number, y: number) => `<g class="${cls}"><circle cx="${x}" cy="${y}" r="9" class="cc-finger"/></g>`;
-  const cursor = (cls: string, x: number, y: number) =>
-    `<g class="${cls}"><path d="M${x} ${y}l0 17 4.5-4.2 3.3 7.2 3-1.4-3.2-7 6.2-.4z" class="cc-cursor"/></g>`;
-  if (kind === 'draw') {
-    const pointer = touch ? finger('cc-draw-move', 34, 21) : cursor('cc-draw-move', 32, 18);
-    return `<svg viewBox="0 0 120 90" aria-hidden="true">${cells(3, 3, 24, 11, 20, 4, [0, 0, '4'])}<rect x="24" y="11" width="44" height="44" rx="5" class="cc-rect cc-draw-grow"/>${pointer}</svg>`;
-  }
-  if (kind === 'tap') {
-    // a placed rectangle over the 4; tapping the number removes it
-    const x = 34;
-    const y = 21;
-    const pointer = touch ? finger('cc-tap-move', x, y) : cursor('cc-tap-move', x - 2, y - 3);
-    return `<svg viewBox="0 0 120 90" aria-hidden="true">${cells(3, 3, 24, 11, 20, 4)}<rect x="24" y="11" width="44" height="44" rx="5" class="cc-rect cc-tap-rect"/><text x="34" y="26" class="cc-num">4</text><circle cx="${x}" cy="${y}" r="12" class="cc-ripple"/>${pointer}</svg>`;
-  }
-  if (kind === 'pan') {
-    const pointers = touch ? finger('cc-pan-move', 50, 46) + finger('cc-pan-move', 72, 46) : cursor('cc-pan-move', 56, 40);
-    return `<svg viewBox="0 0 120 90" aria-hidden="true"><g class="cc-pan-move">${cells(5, 4, 4, 2, 20, 4, [2, 1, '6'])}</g>${pointers}</svg>`;
-  }
-  const pointers = touch
-    ? finger('cc-zoom-a', 50, 50) + finger('cc-zoom-b', 70, 40)
-    : `<g><rect x="50" y="30" width="20" height="32" rx="10" class="cc-mouse"/><line x1="60" y1="35" x2="60" y2="43" class="cc-wheel"/></g>`;
-  return `<svg viewBox="0 0 120 90" aria-hidden="true"><g class="cc-zoom-grow">${cells(3, 3, 24, 9, 20, 4, [0, 0, '9'])}</g>${pointers}</svg>`;
+function openGuide() {
+  $('#guide-art').innerHTML = guideArt(touchFirst());
+  coachModal.hidden = true;
+  helpModal.hidden = false;
 }
-function renderCoach() {
+function openCoach() {
   const touch = touchFirst();
-  const items: [string, 'draw' | 'tap' | 'pan' | 'zoom', string][] = [
+  const items: [string, ControlKind, string][] = [
     ['Draw', 'draw', 'Drag across a number to draw'],
     ['Undo', 'tap', `${touch ? 'Tap' : 'Click'} a number to remove its rectangle`],
     ['Move', 'pan', touch ? 'Two fingers to move around' : 'Drag empty ground to move around'],
     ['Zoom', 'zoom', touch ? 'Pinch to zoom' : 'Scroll to zoom'],
   ];
   $('#coach-items').innerHTML = items
-    .map(([title, kind, caption]) => `<div class="coach-item">${coachArt(kind, touch)}<div class="coach-title">${title}</div><div class="coach-cap">${caption}</div></div>`)
+    .map(([title, kind, caption]) => `<div class="coach-item">${controlArt(kind, touch)}<div class="coach-title">${title}</div><div class="coach-cap">${caption}</div></div>`)
     .join('');
-}
-function openCoach() {
-  renderCoach();
+  helpModal.hidden = true;
   coachModal.hidden = false;
 }
 $('#btn-coach-ok').addEventListener('click', () => {
@@ -736,16 +740,13 @@ $('#btn-coach-ok').addEventListener('click', () => {
   }
   closeModals();
 });
-$('#btn-show-controls').addEventListener('click', () => {
-  helpModal.hidden = true;
-  openCoach();
-});
+$('#btn-coach-guide').addEventListener('click', openGuide);
+$('#btn-show-controls').addEventListener('click', openCoach);
 function anyModalOpen() {
   return (
     !pauseModal.hidden ||
     !helpModal.hidden ||
-    !sizeModal.hidden ||
-    !diffModal.hidden ||
+    !modeSheet.hidden ||
     !runPauseModal.hidden ||
     !resultsModal.hidden ||
     !coachModal.hidden ||
@@ -756,8 +757,7 @@ function closeModals() {
   const wasOpen = !pauseModal.hidden || !helpModal.hidden || !runPauseModal.hidden || !coachModal.hidden;
   pauseModal.hidden = true;
   helpModal.hidden = true;
-  sizeModal.hidden = true;
-  diffModal.hidden = true;
+  modeSheet.hidden = true;
   runPauseModal.hidden = true;
   coachModal.hidden = true;
   if (inGame && !save.seenHelp) {
@@ -768,22 +768,34 @@ function closeModals() {
   if (wasOpen && inGame && runPhase !== 'over') readyUp();
 }
 
-/** Before play (re)starts: show the controls card once, then "3, 2, 1, Go". */
+/**
+ * Is a clock actually running that a pause has stopped? Runs always have one. In
+ * Infinity only once the player has started the active zone (drawn in it, not finished).
+ */
+function clockRunning(): boolean {
+  if (run) return runPhase === 'live';
+  const z = activeZone();
+  return !!z && z.key in save.timers;
+}
+
+/** Before play (re)starts: show the controls once, then "3, 2, 1, Go" if a clock is running. */
 let nextCountdownSub = 'Get ready';
 function readyUp(sub?: string) {
   if (sub) nextCountdownSub = sub;
   if (!coachSeen()) return openCoach();
   const msg = nextCountdownSub;
   nextCountdownSub = 'Get ready';
-  startCountdown(msg);
+  if (clockRunning()) startCountdown(msg);
+  else lastTick = performance.now();
 }
-const MODE_NAMES: Record<ModeId, string> = { classic: 'Classic', fixed: 'Fixed', mosaic: 'Mosaic', singles: 'Singles' };
-const STYLE_NAMES: Record<RunStyle, string> = { timeattack: 'Time Attack', survival: 'Survival' };
-function worldPills(world: ModeId, tileSize?: number, difficulty?: Difficulty): (string | [string, string])[] {
-  if (world === 'fixed') return [['Fixed', 'gold'], `${tileSize}×${tileSize}`];
-  if (world === 'singles') return [['Singles', 'gold'], DIFFICULTY_NAMES[difficulty ?? 'easy']];
-  return [[MODE_NAMES[world], 'gold']];
+const STYLE_NAMES: Record<PlayStyle, string> = { infinity: 'Infinity', timeattack: 'Time Attack', survival: 'Survival' };
+/** "Classic" + its difficulty, "Focused" + its size, or just the World mode's name. */
+function modePills(mode: ModeId, opts: ModeOptions = {}): (string | [string, string])[] {
+  if (mode === 'classic') return [['Classic', 'gold'], DIFFICULTY_NAMES[opts.difficulty ?? 'easy']];
+  if (mode === 'focused') return [['Focused', 'gold'], `${opts.size ?? 8}×${opts.size ?? 8}`];
+  return [[MODE_NAMES[mode], 'gold']];
 }
+const saveOptions = (d: SaveData): ModeOptions => ({ difficulty: d.difficulty, size: d.size });
 function renderStats() {
   const st = save.stats;
   // total area of every solved zone, in square cells (1 cell = 1 m)
@@ -795,7 +807,7 @@ function renderStats() {
     ['Time solving', fmt(st.totalSolveMs)],
     save.mode === 'mosaic'
       ? ['Farthest from home', formatMetres(st.farthestM)]
-      : save.mode === 'singles'
+      : MODE_FAMILY[save.mode] === 'singles'
         ? ['Level reached', `Level ${st.zonesSolved + 1}`]
         : ['Deepest reached', st.deepest ? `Depth ${st.deepest}` : '–'],
     ['Total play time', fmt(st.totalPlayMs)],
@@ -812,7 +824,7 @@ function renderStats() {
         })
         .join('')}</tbody></table>`
     : '<p class="muted">Solve a Shikaku to see your times for each grid size.</p>';
-  $('#pause-mode').innerHTML = pills(worldPills(save.mode, save.tileSize, save.difficulty));
+  $('#pause-mode').innerHTML = pills(modePills(save.mode, saveOptions(save)));
 }
 const statGrid = (rows: [string, string][]) =>
   rows.map(([k, v]) => `<div class="stat"><div class="stat-v">${esc(v)}</div><div class="stat-k">${esc(k)}</div></div>`).join('');
@@ -825,16 +837,18 @@ function openPause() {
   saveNow();
 }
 $('#btn-pause').addEventListener('click', openPause);
-$('#btn-help').addEventListener('click', () => (helpModal.hidden = false));
+$('#btn-help').addEventListener('click', openGuide);
 $('#btn-pause-help').addEventListener('click', () => {
   pauseModal.hidden = true;
-  helpModal.hidden = false;
+  openGuide();
 });
 $('#btn-menu').addEventListener('click', endSession);
 document.querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', closeModals));
 document.querySelectorAll('.modal').forEach((m) =>
   m.addEventListener('click', (e) => {
-    if (e.target === m && m !== resultsModal && m !== confirmModal) closeModals();
+    if (e.target !== m || m === resultsModal || m === confirmModal) return;
+    if (m === modeSheet) modeSheet.hidden = true;
+    else closeModals();
   }),
 );
 continueBtn.addEventListener('click', doContinue);
@@ -846,27 +860,28 @@ homeBtn.addEventListener('click', goHome);
 
 // ---------- sessions & menu ----------
 const HELP_MODE: Record<ModeId, string> = {
-  singles: 'One Shikaku at a time. Solve it to level up. Every few levels the grids get bigger.',
-  classic:
-    'Your Shikaku grow as you travel, from 6×6 all the way to 24×24. To break into a bigger one, clear <b>one whole side</b> of it plus <b>one corner piece</b> next to that side.',
-  fixed:
-    'Every Shikaku is the size you chose, and they get trickier the farther you roam. Clear any neighbour to open a new one.',
-  mosaic:
-    'Your world mixes Shikaku of every size and is never the same twice. Clear <b>every Shikaku along one side</b> of a locked zone to open it. The top of the screen shows how far you are from home.',
-};
-const HELP_RUN: Record<RunStyle, string> = {
+  classic: 'One Shikaku at a time. Solve it to level up; every few levels the grids get bigger.',
+  focused: 'One Shikaku at a time, always your size. Each level is a little trickier.',
+  journey: 'Grids grow as you travel outward. To reach a bigger one, clear one whole side of it plus one corner piece.',
+  mosaic: 'Clear every Shikaku along one side of a locked zone to open it. How far from home can you go?',
+};const HELP_RUN: Record<RunStyle, string> = {
   timeattack: 'Clear as much Shikaku ground as you can before the clock hits zero. Every cell counts. ',
   survival: 'Solve Shikaku to bank time. Bigger grids pay more, and bonuses shrink as you go, so grab the big ones early. ',
 };
 
 async function makeLayout(d: SaveData): Promise<WorldLayout> {
-  if (d.mode === 'fixed') return createFixedLayout(d.tileSize ?? 8);
-  if (d.mode === 'singles') return createSinglesLayout(d.difficulty ?? 'easy');
-  if (d.mode === 'mosaic') {
-    const tiler = await loadTiler(`${import.meta.env.BASE_URL}tilings_66x66.packed.txt`);
-    return createMosaicLayout(d.seed, tiler);
+  switch (d.mode) {
+    case 'classic':
+      return createClassicLayout(d.difficulty ?? 'easy');
+    case 'focused':
+      return createFocusedLayout(d.size ?? 8);
+    case 'mosaic': {
+      const tiler = await loadTiler(`${import.meta.env.BASE_URL}tilings_66x66.packed.txt`);
+      return createMosaicLayout(d.seed, tiler);
+    }
+    default:
+      return createJourneyLayout();
   }
-  return createClassicLayout();
 }
 
 function setSession(L: WorldLayout, d: SaveData, persisted: boolean) {
@@ -897,7 +912,6 @@ function setSession(L: WorldLayout, d: SaveData, persisted: boolean) {
   dirty = true;
 }
 
-const isSingles = (L: WorldLayout): L is SinglesLayout => L.mode === 'singles';
 
 /** Singles: after a solve, slide the next level in and fit it (each level can be a new size). */
 function nextSingle(newlyOpen: Zone[]) {
@@ -908,15 +922,15 @@ function nextSingle(newlyOpen: Zone[]) {
   const SLIDE_MS = 750;
   window.setTimeout(() => {
     if (layout !== L || !inGame) return;
-    // a plain slide: the solved puzzle stays drawn and moves off as the camera glides
-    // straight to the next one; it is dropped once the slide ends
-    L.setCurrent(L.levelOf(next), true);
+    // a plain slide: the camera glides straight to the next level while the finished one
+    // fades out and the next one fades in, so nothing pops on wide screens
+    L.slideTo(L.levelOf(next), performance.now(), SLIDE_MS);
     lastInteracted = next;
     playCam([{ to: camFor(next), dur: SLIDE_MS }]);
     dirty = true;
     window.setTimeout(() => {
       if (layout !== L) return;
-      L.dropPrevious();
+      L.endSlide();
       dirty = true;
     }, SLIDE_MS + 50);
   }, 600);
@@ -939,13 +953,13 @@ async function startSession(d: SaveData) {
   document.body.classList.add('in-game');
   document.body.classList.remove('in-run');
   menuEl.hidden = true;
-  $('#help-mode').innerHTML = HELP_MODE[d.mode];
+  $('#help-mode').textContent = HELP_MODE[d.mode];
   saveNow();
   updateHud();
   // first visit: How to play, then the controls card, then the countdown
   if (!save.seenHelp) {
     nextCountdownSub = 'Go explore';
-    helpModal.hidden = false;
+    openGuide();
   } else readyUp(d.solved.length ? 'Welcome back' : 'Go explore');
 }
 
@@ -955,7 +969,7 @@ function endSession() {
   closeModals();
   resultsModal.hidden = true;
   stopCountdown();
-  const style: MenuStyle = run ? run.style : 'endless';
+  const style: PlayStyle = run ? run.style : 'infinity';
   run = null;
   runPhase = null;
   inGame = false;
@@ -967,19 +981,20 @@ function endSession() {
   showStyle(style);
 }
 
-async function newGame(m: ModeId, tileSize?: number, difficulty?: Difficulty) {
+async function newGame(m: ModeId, opts: ModeOptions = {}) {
+  const what = MODE_FAMILY[m] === 'singles' ? 'progress' : 'world';
   if (
     summarize(m) &&
     !(await askConfirm({
-      title: 'Start a fresh world?',
-      body: `Your current ${MODE_NAMES[m]} world will be lost.`,
+      title: `Start ${what === 'world' ? 'a fresh world' : 'over'}?`,
+      body: `Your current ${MODE_NAMES[m]} ${what} will be lost.`,
       ok: 'Start fresh',
       danger: true,
     }))
   )
     return;
   clearSave(m);
-  startSession(freshSave(m, tileSize, difficulty));
+  startSession(freshSave(m, opts));
 }
 
 // ---------- runs: Time Attack & Survival ----------
@@ -1020,7 +1035,7 @@ function startCountdown(sub: string) {
 }
 
 async function startRun(r: RunState, resume?: SaveData) {
-  const d = resume ?? { ...freshSave(r.world, r.tileSize, r.difficulty), seenHelp: true };
+  const d = resume ?? { ...freshSave(r.mode, runOptions(r)), seenHelp: true };
   menuStatus('Building your world…');
   let L: WorldLayout;
   try {
@@ -1037,7 +1052,7 @@ async function startRun(r: RunState, resume?: SaveData) {
   inGame = true;
   document.body.classList.add('in-game', 'in-run');
   menuEl.hidden = true;
-  $('#help-mode').innerHTML = HELP_RUN[r.style] + HELP_MODE[r.world];
+  $('#help-mode').textContent = HELP_RUN[r.style] + HELP_MODE[r.mode];
   runPhase = 'live';
   saveNow();
   updateHud();
@@ -1046,7 +1061,7 @@ async function startRun(r: RunState, resume?: SaveData) {
       ? 'Welcome back'
       : r.style === 'timeattack'
         ? `Clear all you can in ${r.minutes} minutes`
-        : `You have ${SURVIVAL_START_MS / 1000} seconds. Every Shikaku buys you more`,
+        : `You have ${clock(r.clockMs)}. Every Shikaku buys you more`,
   );
 }
 
@@ -1090,7 +1105,7 @@ function onRunSolved(z: Zone, newlyOpen: Zone[]) {
 function runPills(r: RunState): (string | [string, string])[] {
   return [
     [STYLE_NAMES[r.style], 'gold'],
-    ...worldPills(r.world, r.tileSize, r.difficulty).map((p) => (typeof p === 'string' ? p : p[0])),
+    ...modePills(r.mode, runOptions(r)).map((p) => (typeof p === 'string' ? p : p[0])),
     ...(r.minutes ? [`${r.minutes} min`] : []),
   ];
 }
@@ -1124,10 +1139,10 @@ function endRun(surrendered = false) {
   stopCountdown();
   preview = null;
   mode = { kind: 'none' };
-  const key = recordKey(run.style, run.world, run.tileSize, run.minutes, run.difficulty);
+  const key = recordKey(run.style, run.mode, runOptions(run), run.minutes);
   const previous = getRecord(key);
   const isBest = submitRecord(run);
-  if (run.style === 'survival') clearSurvival(run.world, run.tileSize, run.difficulty);
+  if (run.style === 'survival') clearSurvival(run.mode, runOptions(run));
   closeModals();
   showResults(run, isBest, previous, surrendered);
   updateHud();
@@ -1167,9 +1182,9 @@ $('#btn-run-restart').addEventListener('click', async () => {
     return;
   if (!run) return;
   const r = run;
-  if (r.style === 'survival') clearSurvival(r.world, r.tileSize, r.difficulty);
+  if (r.style === 'survival') clearSurvival(r.mode, runOptions(r));
   runPauseModal.hidden = true;
-  startRun(newRun(r.style, r.world, r.tileSize, r.minutes, r.difficulty));
+  startRun(newRun(r.style, r.mode, runOptions(r), r.minutes));
 });
 $('#btn-run-quit').addEventListener('click', async () => {
   if (!run) return;
@@ -1198,29 +1213,19 @@ $('#btn-run-surrender').addEventListener('click', async () => {
 $('#btn-again').addEventListener('click', () => {
   if (!run) return;
   const r = run;
-  startRun(newRun(r.style, r.world, r.tileSize, r.minutes, r.difficulty));
+  startRun(newRun(r.style, r.mode, runOptions(r), r.minutes));
 });
 $('#btn-results-menu').addEventListener('click', endSession);
 
 // ---------- menu ----------
-type MenuStyle = 'endless' | RunStyle;
-const STYLE_COPY: Record<MenuStyle, { title: string; pitch: string }> = {
-  endless: {
-    title: 'Infinity',
-    pitch: "Explore your own Shikaku world at your own pace. It's saved, so you can always pick up where you left off.",
-  },
-  timeattack: { title: 'Time Attack', pitch: 'Beat the clock. Clear as much Shikaku ground as you can before time runs out.' },
-  survival: { title: 'Survival', pitch: 'Every Shikaku you solve buys you more time. How long can you last?' },
-};
-const WORLD_DESC: Record<ModeId, string> = {
-  singles: 'One Shikaku at a time. Levels get bigger as you go.',
-  classic: 'Starts small and grows bigger the farther you go.',
-  fixed: 'One grid size, all the way. You pick it.',
-  mosaic: 'Every size, all mixed up, never the same twice.',
+const STYLE_PITCH: Record<PlayStyle, string> = {
+  infinity: "Explore your own Shikaku at your own pace. It's saved, so you can always pick up where you left off.",
+  timeattack: 'Beat the clock. Clear as much Shikaku ground as you can before time runs out.',
+  survival: 'Every Shikaku you solve buys you more time. How long can you last?',
 };
 
 const menuEl = $('#menu');
-let menuStyle: MenuStyle | null = null;
+let menuStyle: PlayStyle | null = null;
 function menuStatus(msg: string) {
   $('#menu-status').textContent = msg;
 }
@@ -1240,70 +1245,128 @@ function showHome() {
   $('#menu-style').hidden = true;
 }
 
-function showStyle(style: MenuStyle) {
+function showStyle(style: PlayStyle) {
   menuStyle = style;
   menuStatus('');
   $('#menu-home').hidden = true;
   $('#menu-style').hidden = false;
-  $('#style-title').textContent = STYLE_COPY[style].title;
-  $('#style-pitch').textContent = STYLE_COPY[style].pitch;
-  $('#endless-panel').hidden = style !== 'endless';
-  $('#run-panel').hidden = style === 'endless';
-  if (style === 'endless') renderEndless();
+  $('#style-title').textContent = STYLE_NAMES[style];
+  $('#style-pitch').textContent = STYLE_PITCH[style];
+  $('#infinity-panel').hidden = style !== 'infinity';
+  $('#run-panel').hidden = style === 'infinity';
+  if (style === 'infinity') renderInfinity();
   else renderRunPanel();
   menuEl.scrollTop = 0;
 }
 
-function renderEndless() {
-  for (const m of ['classic', 'fixed', 'mosaic', 'singles'] as ModeId[]) {
-    const card = $(`.mode-card[data-mode="${m}"]`);
-    const sum = summarize(m);
-    const cont = card.querySelector<HTMLButtonElement>('[data-action="continue"]')!;
-    const line = card.querySelector<HTMLElement>('.mode-save')!;
-    cont.hidden = !sum;
-    if (sum) {
-      line.innerHTML = pills([
-        ...(m === 'fixed' ? [[`${sum.tileSize}×${sum.tileSize}`, 'gold'] as [string, string]] : []),
-        ...(m === 'singles' ? [[DIFFICULTY_NAMES[sum.difficulty ?? 'easy'], 'gold'] as [string, string]] : []),
-        m === 'singles' ? `Level ${sum.zonesSolved + 1}` : `${sum.zonesSolved} solved`,
-        ...(m === 'singles' ? [] : [m === 'mosaic' ? formatMetres(sum.farthestM) : `Depth ${sum.deepest || 1}`]),
-        `${fmt(sum.totalPlayMs)} played`,
-        [ago(sum.lastPlayed), 'dim'],
-      ]);
-    } else line.innerHTML = pills([['No saved world yet', 'dim']]);
-  }
+/** 2×2 animated mode cards: Singles on top, World below. */
+function renderModeCards(container: HTMLElement, opts: { selected?: ModeId; saved?: (m: ModeId) => boolean }) {
+  container.innerHTML = MODE_ROWS.map(
+    (row) => `<div class="family"><div class="family-label">${row.label}</div><div class="family-row">${row.modes
+      .map(
+        (m) => `<button class="mode-tile" data-mode="${m}" aria-pressed="${opts.selected === m}">
+          <span class="saved-dot" ${opts.saved?.(m) ? '' : 'hidden'} title="Saved game"></span>
+          ${modeArt(m)}
+          <div class="mode-tile-name">${MODE_NAMES[m]}</div>
+          <div class="mode-tile-hook">${MODE_HOOKS[m]}</div>
+        </button>`,
+      )
+      .join('')}</div></div>`,
+  ).join('');
 }
 
-const prefs = loadPrefs();
-function runSettings() {
-  const style = menuStyle as RunStyle;
-  const p = style === 'timeattack' ? prefs.ta : prefs.sv;
-  const world = p.world;
-  return {
-    style,
-    world,
-    size: p.size,
-    tile: world === 'fixed' ? p.size : undefined,
-    difficulty: world === 'singles' ? p.difficulty : undefined,
-    minutes: style === 'timeattack' ? prefs.ta.minutes : undefined,
-  };
+// ----- Infinity: cards open a mode sheet with Continue / New -----
+function renderInfinity() {
+  renderModeCards($('#infinity-panel'), { saved: (m) => !!summarize(m) });
 }
+$('#infinity-panel').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('.mode-tile');
+  if (b) openModeSheet(b.dataset.mode as ModeId);
+});
+
+let sheetMode: ModeId = 'classic';
+let sheetOpts: ModeOptions = { difficulty: 'easy', size: 8 };
+function openModeSheet(m: ModeId) {
+  sheetMode = m;
+  const sum = summarize(m);
+  sheetOpts = { difficulty: sum?.difficulty ?? sheetOpts.difficulty ?? 'easy', size: sum?.size ?? sheetOpts.size ?? 8 };
+  $('#mode-sheet-art').innerHTML = modeArt(m);
+  $('#mode-sheet-title').textContent = MODE_NAMES[m];
+  $('#mode-sheet-desc').textContent = MODE_DESCRIPTIONS[m];
+  $('#mode-sheet-save').innerHTML = sum
+    ? pills([
+        ...(m === 'classic' ? [[DIFFICULTY_NAMES[sum.difficulty ?? 'easy'], 'gold'] as [string, string]] : []),
+        ...(m === 'focused' ? [[`${sum.size}×${sum.size}`, 'gold'] as [string, string]] : []),
+        MODE_FAMILY[m] === 'singles' ? `Level ${sum.zonesSolved + 1}` : `${sum.zonesSolved} solved`,
+        ...(m === 'mosaic' ? [formatMetres(sum.farthestM)] : m === 'journey' ? [`Depth ${sum.deepest || 1}`] : []),
+        `${fmt(sum.totalPlayMs)} played`,
+        [ago(sum.lastPlayed), 'dim'],
+      ])
+    : pills([['Not started yet', 'dim']]);
+  $<HTMLButtonElement>('#btn-mode-continue').hidden = !sum;
+  $('#btn-mode-new').textContent = sum ? 'New' : 'Start';
+  $('#btn-mode-new').className = sum ? 'secondary' : 'primary';
+  renderSheetOption();
+  modeSheet.hidden = false;
+}
+/** Classic picks a difficulty, Focused a grid size; World modes have no option. */
+function renderSheetOption() {
+  const box = $('#mode-sheet-option');
+  box.hidden = MODE_FAMILY[sheetMode] !== 'singles';
+  if (box.hidden) return;
+  const seg = $('#mode-sheet-option-seg');
+  if (sheetMode === 'classic') {
+    $('#mode-sheet-option-label').textContent = 'Challenge for a new game';
+    seg.innerHTML = DIFFICULTIES.map(
+      (d) =>
+        `<button class="seg-btn" data-diff="${d}" role="radio" aria-checked="${sheetOpts.difficulty === d}">${DIFFICULTY_NAMES[d]}</button>`,
+    ).join('');
+  } else {
+    $('#mode-sheet-option-label').textContent = 'Grid for a new game';
+    seg.innerHTML = FOCUSED_SIZES.map(
+      (n) => `<button class="seg-btn" data-size="${n}" role="radio" aria-checked="${sheetOpts.size === n}">${n}×${n}</button>`,
+    ).join('');
+  }
+}
+$('#mode-sheet-option-seg').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('.seg-btn');
+  if (!b) return;
+  if (b.dataset.diff) sheetOpts.difficulty = b.dataset.diff as Difficulty;
+  if (b.dataset.size) sheetOpts.size = Number(b.dataset.size);
+  renderSheetOption();
+});
+$('#btn-mode-continue').addEventListener('click', () => {
+  const d = loadSave(sheetMode);
+  if (!d) return;
+  modeSheet.hidden = true;
+  startSession(d);
+});
+$('#btn-mode-new').addEventListener('click', () => {
+  modeSheet.hidden = true;
+  newGame(sheetMode, { ...sheetOpts });
+});
+
+// ----- Time Attack & Survival setup: the same cards pick the mode -----
+const prefs = loadPrefs();
+const choice = (): RunChoice => (menuStyle === 'timeattack' ? prefs.timeattack : prefs.survival);
+const choiceOptions = (c: RunChoice): ModeOptions => ({ difficulty: c.difficulty, size: c.size });
 function setChecked(container: HTMLElement, attr: string, value: string) {
   container.querySelectorAll<HTMLElement>('.seg-btn').forEach((b) => b.setAttribute('aria-checked', String(b.dataset[attr] === value)));
 }
 function renderRunPanel() {
-  const { style, world, size, tile, difficulty, minutes } = runSettings();
-  setChecked($('#run-world'), 'world', world);
-  $('#run-world-desc').textContent = WORLD_DESC[world];
-  $('#run-size-field').hidden = world !== 'fixed';
-  setChecked($('#run-sizes'), 'size', String(size));
-  $('#run-diff-field').hidden = world !== 'singles';
-  setChecked($('#run-diffs'), 'diff', difficulty ?? 'easy');
+  const style = menuStyle as RunStyle;
+  const c = choice();
+  const opts = choiceOptions(c);
+  renderModeCards($('#run-cards'), { selected: c.mode });
+  $('#run-size-field').hidden = c.mode !== 'focused';
+  setChecked($('#run-sizes'), 'size', String(c.size));
+  $('#run-diff-field').hidden = c.mode !== 'classic';
+  setChecked($('#run-diffs'), 'diff', c.difficulty);
   $('#run-minutes-field').hidden = style !== 'timeattack';
-  setChecked($('#run-minutes'), 'minutes', String(minutes));
+  setChecked($('#run-minutes'), 'minutes', String(c.minutes));
   $('#run-start-row').hidden = style !== 'survival';
-  if (style === 'survival') $('#run-start-time').innerHTML = pills([[clock(survivalStartMs(world, tile, difficulty)), 'gold']]);
-  const rec = getRecord(recordKey(style, world, tile, minutes, difficulty));
+  if (style === 'survival') $('#run-start-time').innerHTML = pills([[clock(survivalStartMs(c.mode, opts)), 'gold']]);
+  const rec = getRecord(recordKey(style, c.mode, opts, style === 'timeattack' ? c.minutes : undefined));
   $('#run-best').innerHTML = rec
     ? pills(
         style === 'timeattack'
@@ -1311,7 +1374,7 @@ function renderRunPanel() {
           : [[fmt(rec.survivedMs ?? 0), 'gold'], area(rec.area), zonesText(rec.zones)],
       )
     : pills([['No record yet', 'dim']]);
-  const slot = style === 'survival' ? loadSurvival(world, tile, difficulty) : null;
+  const slot = style === 'survival' ? loadSurvival(c.mode, opts) : null;
   $('#sv-saved').hidden = !slot;
   $('#btn-run-start').hidden = !!slot;
   if (slot)
@@ -1322,75 +1385,47 @@ function renderRunPanel() {
       `${fmt(slot.run.elapsedMs)} survived`,
     ]);
 }
-$('#run-sizes').innerHTML = FIXED_SIZES.map((n) => `<button class="seg-btn" data-size="${n}" role="radio">${n}×${n}</button>`).join('');
+$('#run-sizes').innerHTML = FOCUSED_SIZES.map((n) => `<button class="seg-btn" data-size="${n}" role="radio">${n}×${n}</button>`).join('');
 $('#run-diffs').innerHTML = DIFFICULTIES.map((d) => `<button class="seg-btn" data-diff="${d}" role="radio">${DIFFICULTY_NAMES[d]}</button>`).join('');
 $('#run-minutes').innerHTML = TA_MINUTES.map((n) => `<button class="seg-btn" data-minutes="${n}" role="radio">${n} min</button>`).join('');
-function updatePrefs(change: (p: { world: ModeId; size: number; minutes?: number; difficulty: Difficulty }) => void) {
-  const p = menuStyle === 'timeattack' ? prefs.ta : prefs.sv;
-  change(p);
+function updateChoice(change: (c: RunChoice) => void) {
+  change(choice());
   savePrefs(prefs);
   renderRunPanel();
 }
+$('#run-cards').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('.mode-tile');
+  if (b) updateChoice((c) => (c.mode = b.dataset.mode as ModeId));
+});
 const segClick = (id: string, apply: (b: HTMLElement) => void) =>
   $(id).addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('.seg-btn');
     if (b) apply(b);
   });
-segClick('#run-world', (b) => updatePrefs((p) => (p.world = b.dataset.world as ModeId)));
-segClick('#run-sizes', (b) => updatePrefs((p) => (p.size = Number(b.dataset.size))));
-segClick('#run-diffs', (b) => updatePrefs((p) => (p.difficulty = b.dataset.diff as Difficulty)));
-segClick('#run-minutes', (b) => updatePrefs((p) => (p.minutes = Number(b.dataset.minutes))));
+segClick('#run-sizes', (b) => updateChoice((c) => (c.size = Number(b.dataset.size))));
+segClick('#run-diffs', (b) => updateChoice((c) => (c.difficulty = b.dataset.diff as Difficulty)));
+segClick('#run-minutes', (b) => updateChoice((c) => (c.minutes = Number(b.dataset.minutes))));
 $('#btn-run-start').addEventListener('click', () => {
-  const { style, world, tile, difficulty, minutes } = runSettings();
-  startRun(newRun(style, world, tile, minutes, difficulty));
+  const c = choice();
+  startRun(newRun(menuStyle as RunStyle, c.mode, choiceOptions(c), c.minutes));
 });
 $('#btn-sv-continue').addEventListener('click', () => {
-  const { world, tile, difficulty } = runSettings();
-  const slot = loadSurvival(world, tile, difficulty);
+  const c = choice();
+  const slot = loadSurvival(c.mode, choiceOptions(c));
   if (slot) startRun(slot.run, slot.save);
 });
 $('#btn-sv-new').addEventListener('click', async () => {
-  const { world, tile, difficulty } = runSettings();
+  const c = choice();
   if (!(await askConfirm({ title: 'Start a new run?', body: 'Your run in progress will be lost.', ok: 'Start new run', danger: true })))
     return;
-  clearSurvival(world, tile, difficulty);
-  startRun(newRun('survival', world, tile, undefined, difficulty));
+  clearSurvival(c.mode, choiceOptions(c));
+  startRun(newRun('survival', c.mode, choiceOptions(c)));
 });
 
 document.querySelectorAll<HTMLButtonElement>('.style-btn').forEach((b) =>
-  b.addEventListener('click', () => showStyle(b.dataset.style as MenuStyle)),
+  b.addEventListener('click', () => showStyle(b.dataset.style as PlayStyle)),
 );
 $('#btn-back').addEventListener('click', showHome);
-document.querySelectorAll<HTMLButtonElement>('.mode-card button').forEach((btn) =>
-  btn.addEventListener('click', () => {
-    const m = btn.closest<HTMLElement>('.mode-card')!.dataset.mode as ModeId;
-    if (btn.dataset.action === 'continue') {
-      const d = loadSave(m);
-      if (d) startSession(d);
-    } else if (m === 'fixed') {
-      sizeModal.hidden = false;
-    } else if (m === 'singles') {
-      diffModal.hidden = false;
-    } else newGame(m);
-  }),
-);
-const sizesText = (d: Difficulty) => [...new Set(SINGLES_PATTERNS[d])].sort((a, b) => a - b).join(', ');
-$('#diff-grid').innerHTML = DIFFICULTIES.map(
-  (d) => `<button class="diff-chip" data-diff="${d}">${DIFFICULTY_NAMES[d]}<small>${sizesText(d)}</small></button>`,
-).join('');
-document.querySelectorAll<HTMLButtonElement>('.diff-chip').forEach((b) =>
-  b.addEventListener('click', () => {
-    diffModal.hidden = true;
-    newGame('singles', undefined, b.dataset.diff as Difficulty);
-  }),
-);
-$('#size-grid').innerHTML = FIXED_SIZES.map((n) => `<button class="size-chip" data-size="${n}">${n}×${n}</button>`).join('');
-document.querySelectorAll<HTMLButtonElement>('.size-chip').forEach((b) =>
-  b.addEventListener('click', () => {
-    sizeModal.hidden = true;
-    newGame('fixed', Number(b.dataset.size));
-  }),
-);
 
 // ---------- main loop ----------
 let lastTick = performance.now();

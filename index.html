@@ -51,22 +51,15 @@
     </div>
 
     <div id="help-modal" class="modal" hidden>
-      <div class="sheet">
+      <div class="sheet guide">
         <h2>How to play</h2>
-        <p>Split each zone into rectangles. Every rectangle holds <b>exactly one number</b>, and that number is its <b>area</b>.</p>
-        <div class="demo" aria-hidden="true">
-          <div class="d a">4</div><div class="d a"></div><div class="d b">2</div>
-          <div class="d a"></div><div class="d a"></div><div class="d b"></div>
-        </div>
-        <p>Drag across cells to draw a rectangle. Tap a rectangle to remove it. Tap a <b>1</b> to fill it.</p>
-        <p>Solve a zone to unlock its neighbours, then hit <b>Continue</b> to glide to the next one. The world never ends, and it gets harder the further you travel.</p>
-        <p id="help-mode"></p>
-        <p class="muted">Your clock starts with your first rectangle and pauses whenever you look away or zoom out. Stuck? Tap <b>Easier</b> for a smaller Shikaku nearby.</p>
-        <p class="muted">The gold house marks where you started; the house button takes you back. Zoom with + / − or fit the view with ⤢.</p>
-        <p class="muted">Drag on empty space to pan. Pinch or scroll to zoom. Pause (Esc) shows your stats. Progress saves automatically on this device, separately for each mode.</p>
+        <div id="guide-art" class="guide-art"></div>
+        <p>Drag across a number to make a rectangle with that many cells.</p>
+        <p>Every cell belongs to exactly one rectangle.</p>
+        <p id="help-mode" class="muted"></p>
         <div class="stack">
           <button class="primary" data-close>Let's go</button>
-          <button id="btn-show-controls" class="secondary">Show controls</button>
+          <button id="btn-show-controls" class="secondary">Controls</button>
         </div>
       </div>
     </div>
@@ -87,14 +80,6 @@
       </div>
     </div>
 
-    <div id="size-modal" class="modal" hidden>
-      <div class="sheet">
-        <h2>Choose your grid</h2>
-        <p class="muted">Your whole world will use this size. Bigger grids, bigger challenge.</p>
-        <div id="size-grid" class="size-grid"></div>
-        <div class="row"><button class="secondary" data-close>Cancel</button></div>
-      </div>
-    </div>
 
     <div id="run-pause-modal" class="modal" hidden>
       <div class="sheet">
@@ -129,9 +114,30 @@
 
     <div id="coach-modal" class="modal coach-modal" hidden>
       <div class="sheet coach">
-        <h2>Getting around</h2>
+        <h2>Controls</h2>
         <div id="coach-items" class="coach-items"></div>
-        <button id="btn-coach-ok" class="primary">Got it</button>
+        <div class="stack">
+          <button id="btn-coach-ok" class="primary">Got it</button>
+          <button id="btn-coach-guide" class="secondary">Back to guide</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="mode-sheet" class="modal" hidden>
+      <div class="sheet mode-sheet">
+        <div id="mode-sheet-art" class="mode-sheet-art"></div>
+        <h2 id="mode-sheet-title"></h2>
+        <p id="mode-sheet-desc" class="mode-desc muted"></p>
+        <div id="mode-sheet-save" class="pill-row sheet-pills"></div>
+        <div id="mode-sheet-option" class="mode-option">
+          <div id="mode-sheet-option-label" class="field-label"></div>
+          <div id="mode-sheet-option-seg" class="seg seg-wrap" role="radiogroup"></div>
+        </div>
+        <div class="stack">
+          <button id="btn-mode-continue" class="primary">Continue</button>
+          <button id="btn-mode-new" class="secondary">New</button>
+          <button class="secondary" data-close>Close</button>
+        </div>
       </div>
     </div>
 
@@ -151,14 +157,6 @@
       <div class="countdown-sub"></div>
     </div>
 
-    <div id="diff-modal" class="modal" hidden>
-      <div class="sheet">
-        <h2>Pick your challenge</h2>
-        <p class="muted">One Shikaku at a time. Every few levels the grids get bigger.</p>
-        <div id="diff-grid" class="diff-grid"></div>
-        <div class="row"><button class="secondary" data-close>Cancel</button></div>
-      </div>
-    </div>
 
     <div id="menu" class="menu" hidden>
       <div class="menu-inner">
@@ -166,7 +164,7 @@
           <div class="menu-title">Infinite<span>Shikaku</span></div>
           <p class="menu-tag">Never-ending Shikaku.</p>
           <div class="style-list">
-            <button class="style-btn" data-style="endless">
+            <button class="style-btn" data-style="infinity">
               <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M7.5 8.5c-2 0-3.5 1.6-3.5 3.5s1.5 3.5 3.5 3.5c3 0 6-7 9-7 2 0 3.5 1.6 3.5 3.5s-1.5 3.5-3.5 3.5c-3 0-6-7-9-7z" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linejoin="round"/></svg>
               <span>Infinity</span>
             </button>
@@ -189,68 +187,10 @@
           <h2 id="style-title" class="style-title"></h2>
           <p id="style-pitch" class="style-pitch"></p>
 
-          <div id="endless-panel" class="mode-list">
-            <section class="mode-card" data-mode="classic">
-              <div class="mode-head">
-                <h3>Classic</h3>
-                <span class="mode-badge">The journey</span>
-              </div>
-              <p>Start small and push outward. Every step brings bigger grids and tougher Shikaku.</p>
-              <div class="mode-save pill-row"></div>
-              <div class="mode-actions">
-                <button class="primary" data-action="continue">Continue</button>
-                <button class="secondary" data-action="new">New</button>
-              </div>
-            </section>
-            <section class="mode-card" data-mode="fixed">
-              <div class="mode-head">
-                <h3>Fixed</h3>
-                <span class="mode-badge">Your pace</span>
-              </div>
-              <p>Pick your favourite grid and play it forever. Quick 6×6 breaks or epic 24×24 marathons.</p>
-              <div class="mode-save pill-row"></div>
-              <div class="mode-actions">
-                <button class="primary" data-action="continue">Continue</button>
-                <button class="secondary" data-action="new">New</button>
-              </div>
-            </section>
-            <section class="mode-card" data-mode="mosaic">
-              <div class="mode-head">
-                <h3>Mosaic</h3>
-                <span class="mode-badge">One of a kind</span>
-              </div>
-              <p>Small and huge Shikaku side by side, in a world no one else will ever see. How far from home can you go?</p>
-              <div class="mode-save pill-row"></div>
-              <div class="mode-actions">
-                <button class="primary" data-action="continue">Continue</button>
-                <button class="secondary" data-action="new">New</button>
-              </div>
-            </section>
-            <section class="mode-card" data-mode="singles">
-              <div class="mode-head">
-                <h3>Singles</h3>
-                <span class="mode-badge">One at a time</span>
-              </div>
-              <p>One Shikaku at a time, level after level. Pick your challenge.</p>
-              <div class="mode-save pill-row"></div>
-              <div class="mode-actions">
-                <button class="primary" data-action="continue">Continue</button>
-                <button class="secondary" data-action="new">New</button>
-              </div>
-            </section>
-          </div>
+          <div id="infinity-panel" class="mode-grid"></div>
 
           <div id="run-panel" class="run-panel" hidden>
-            <div class="field">
-              <div class="field-label">World</div>
-              <div id="run-world" class="seg" role="radiogroup" aria-label="World">
-                <button class="seg-btn" data-world="classic" role="radio">Classic</button>
-                <button class="seg-btn" data-world="fixed" role="radio">Fixed</button>
-                <button class="seg-btn" data-world="mosaic" role="radio">Mosaic</button>
-                <button class="seg-btn" data-world="singles" role="radio">Singles</button>
-              </div>
-              <div id="run-world-desc" class="field-desc"></div>
-            </div>
+            <div id="run-cards" class="mode-grid"></div>
             <div id="run-size-field" class="field" hidden>
               <div class="field-label">Grid</div>
               <div id="run-sizes" class="seg seg-wrap" role="radiogroup" aria-label="Grid size"></div>

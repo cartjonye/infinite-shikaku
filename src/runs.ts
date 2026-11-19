@@ -3,8 +3,8 @@
  * every solve tops up; saved so a long run survives a closed tab). Also personal bests
  * and the player's last-picked run settings.
  */
-import { singlesSize, type Difficulty, type ModeId } from './layouts';
-import { migrateSinglesSave, type SaveData } from './storage';
+import { classicLevelSize, type Difficulty, type ModeId } from './layouts';
+import { PREFIX, type ModeOptions, type SaveData } from './storage';
 
 export type RunStyle = 'timeattack' | 'survival';
 
@@ -53,21 +53,22 @@ export function survivalBonusMs(size: number, n: number): number {
   return row[survivalStep(n)] * 1000;
 }
 
-/** The size of the first grid a run in this world starts on. */
-export function firstGridSize(world: ModeId, tileSize?: number, difficulty?: Difficulty): number {
-  if (world === 'fixed') return tileSize ?? 8;
-  if (world === 'singles') return singlesSize(difficulty ?? 'easy', 1);
+/** The size of the first grid a run in this mode starts on. */
+export function firstGridSize(mode: ModeId, opts: ModeOptions = {}): number {
+  if (mode === 'focused') return opts.size ?? 8;
+  if (mode === 'classic') return classicLevelSize(opts.difficulty ?? 'easy', 1);
   return 6;
 }
-export const survivalStartMs = (world: ModeId, tileSize?: number, difficulty?: Difficulty) =>
-  (SURVIVAL_START_S[firstGridSize(world, tileSize, difficulty)] ?? SURVIVAL_START_S[6]) * 1000;
+export const survivalStartMs = (mode: ModeId, opts: ModeOptions = {}) =>
+  (SURVIVAL_START_S[firstGridSize(mode, opts)] ?? SURVIVAL_START_S[6]) * 1000;
 
 export interface RunState {
   style: RunStyle;
-  world: ModeId;
-  tileSize?: number;
-  /** Singles only */
+  mode: ModeId;
+  /** Classic only */
   difficulty?: Difficulty;
+  /** Focused only */
+  size?: number;
   /** Time Attack length */
   minutes?: number;
   /** time left on the clock */
@@ -80,20 +81,17 @@ export interface RunState {
   bySize: Record<string, number>;
 }
 
-export function newRun(
-  style: RunStyle,
-  world: ModeId,
-  tileSize?: number,
-  minutes?: number,
-  difficulty?: Difficulty,
-): RunState {
+/** A run's mode options, in the shape saves and keys use. */
+export const runOptions = (r: RunState): ModeOptions => ({ difficulty: r.difficulty, size: r.size });
+
+export function newRun(style: RunStyle, mode: ModeId, opts: ModeOptions = {}, minutes?: number): RunState {
   return {
     style,
-    world,
-    tileSize: world === 'fixed' ? tileSize : undefined,
-    difficulty: world === 'singles' ? (difficulty ?? 'easy') : undefined,
-    minutes: style === 'timeattack' ? minutes : undefined,
-    clockMs: style === 'timeattack' ? (minutes ?? 5) * 60_000 : survivalStartMs(world, tileSize, difficulty),
+    mode,
+    difficulty: mode === 'classic' ? (opts.difficulty ?? 'easy') : undefined,
+    size: mode === 'focused' ? (opts.size ?? 8) : undefined,
+    minutes: style === 'timeattack' ? (minutes ?? 5) : undefined,
+    clockMs: style === 'timeattack' ? (minutes ?? 5) * 60_000 : survivalStartMs(mode, opts),
     elapsedMs: 0,
     area: 0,
     zones: 0,
@@ -112,12 +110,13 @@ export function creditSolve(run: RunState, size: number): number {
   return bonus;
 }
 
-export const worldId = (world: ModeId, tileSize?: number, difficulty?: Difficulty) =>
-  world === 'fixed' ? `fixed-${tileSize}` : world === 'singles' ? `singles-${difficulty ?? 'easy'}` : world;
+/** Mode plus its option, e.g. "classic-hard", "focused-12", "mosaic". */
+export const modeVariant = (mode: ModeId, opts: ModeOptions = {}) =>
+  mode === 'classic' ? `classic-${opts.difficulty ?? 'easy'}` : mode === 'focused' ? `focused-${opts.size ?? 8}` : mode;
 
-export function recordKey(style: RunStyle, world: ModeId, tileSize?: number, minutes?: number, difficulty?: Difficulty) {
-  const w = worldId(world, tileSize, difficulty);
-  return style === 'timeattack' ? `ta:${w}:${minutes}` : `sv:${w}`;
+export function recordKey(style: RunStyle, mode: ModeId, opts: ModeOptions = {}, minutes?: number) {
+  const v = modeVariant(mode, opts);
+  return style === 'timeattack' ? `ta:${v}:${minutes}` : `sv:${v}`;
 }
 
 export interface RunRecord {
@@ -138,10 +137,9 @@ export function isBetter(style: RunStyle, a: RunRecord, b: RunRecord | null | un
 }
 
 // ---------- storage helpers ----------
-const RECORDS_KEY = 'infinite-shikaku:records:v1';
-const PREFS_KEY = 'infinite-shikaku:run-prefs:v1';
-const survivalKey = (world: ModeId, tileSize?: number, difficulty?: Difficulty, version?: number) =>
-  `infinite-shikaku:survival:${worldId(world, tileSize, difficulty)}:v${version ?? (world === 'singles' ? 3 : 1)}`;
+const RECORDS_KEY = `${PREFIX}records`;
+const PREFS_KEY = `${PREFIX}prefs`;
+const survivalKey = (mode: ModeId, opts: ModeOptions = {}) => `${PREFIX}survival:${modeVariant(mode, opts)}`;
 
 function read<T>(key: string): T | null {
   try {
@@ -170,7 +168,7 @@ export function getRecord(key: string): RunRecord | null {
 
 /** Store a finished run if it beats the record. Returns true for a new personal best. */
 export function submitRecord(run: RunState): boolean {
-  const key = recordKey(run.style, run.world, run.tileSize, run.minutes, run.difficulty);
+  const key = recordKey(run.style, run.mode, runOptions(run), run.minutes);
   const all = loadRecords();
   const rec: RunRecord = {
     area: run.area,
@@ -185,57 +183,42 @@ export function submitRecord(run: RunState): boolean {
 }
 
 export interface SurvivalSlot {
-  v: 1;
   save: SaveData;
   run: RunState;
 }
 
-const validSlot = (d: SurvivalSlot | null) =>
-  !!d && d.v === 1 && !!d.save && !!d.run && d.run.style === 'survival' && d.run.clockMs > 0;
-
-export function loadSurvival(world: ModeId, tileSize?: number, difficulty?: Difficulty): SurvivalSlot | null {
-  const d = read<SurvivalSlot>(survivalKey(world, tileSize, difficulty));
-  if (validSlot(d)) return d;
-  if (world !== 'singles') return null;
-  // older Singles runs named levels by position: convert them, keeping the run itself
-  for (const version of [2, 1] as const) {
-    const old = read<SurvivalSlot>(survivalKey(world, tileSize, difficulty, version));
-    if (!validSlot(old)) continue;
-    const save = migrateSinglesSave(old!.save, version);
-    if (!save) continue;
-    const slot: SurvivalSlot = { v: 1, save, run: old!.run };
-    if (write(survivalKey(world, tileSize, difficulty), slot))
-      for (const v of [1, 2]) {
-        try {
-          localStorage.removeItem(survivalKey(world, tileSize, difficulty, v));
-        } catch {
-          /* ignore */
-        }
-      }
-    return slot;
-  }
-  return null;
+export function loadSurvival(mode: ModeId, opts: ModeOptions = {}): SurvivalSlot | null {
+  const d = read<SurvivalSlot>(survivalKey(mode, opts));
+  return d && d.save && d.run && d.run.style === 'survival' && d.run.mode === mode && d.run.clockMs > 0 ? d : null;
 }
 export function writeSurvival(save: SaveData, run: RunState): boolean {
-  return write(survivalKey(run.world, run.tileSize, run.difficulty), { v: 1, save, run } satisfies SurvivalSlot);
+  return write(survivalKey(run.mode, runOptions(run)), { save, run } satisfies SurvivalSlot);
 }
-export function clearSurvival(world: ModeId, tileSize?: number, difficulty?: Difficulty) {
+export function clearSurvival(mode: ModeId, opts: ModeOptions = {}) {
   try {
-    localStorage.removeItem(survivalKey(world, tileSize, difficulty));
+    localStorage.removeItem(survivalKey(mode, opts));
   } catch {
     /* ignore */
   }
 }
 
+/** The player's last run choices, per play style. */
+export interface RunChoice {
+  mode: ModeId;
+  difficulty: Difficulty;
+  size: number;
+  minutes: number;
+}
 export interface RunPrefs {
-  ta: { world: ModeId; size: number; minutes: number; difficulty: Difficulty };
-  sv: { world: ModeId; size: number; difficulty: Difficulty };
+  timeattack: RunChoice;
+  survival: RunChoice;
 }
 export function loadPrefs(): RunPrefs {
   const d = read<Partial<RunPrefs>>(PREFS_KEY) ?? {};
+  const base: RunChoice = { mode: 'classic', difficulty: 'easy', size: 8, minutes: 5 };
   return {
-    ta: { world: 'mosaic', size: 8, minutes: 5, difficulty: 'easy', ...(d.ta ?? {}) },
-    sv: { world: 'mosaic', size: 8, difficulty: 'easy', ...(d.sv ?? {}) },
+    timeattack: { ...base, ...(d.timeattack ?? {}) },
+    survival: { ...base, ...(d.survival ?? {}) },
   };
 }
 export function savePrefs(p: RunPrefs) {

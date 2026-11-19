@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { difficultyFor, generateZone, singlesBudget } from '../src/generator';
-import { TIERS, createClassicLayout } from '../src/layouts';
+import { JOURNEY_RINGS, createJourneyLayout } from '../src/layouts';
 import { solve } from '../src/solver';
 
-const L = createClassicLayout();
+const L = createJourneyLayout();
 const spec = (z: { x0: number; y0: number; size: number }) => ({ ...z, depth: L.depthFor(z as any) });
 const samples = [
-  ...TIERS.map((_t, i) => L.zoneAtCell(i === 0 ? 0 : TIERS[i - 1].outer + 1, 3)),
+  ...JOURNEY_RINGS.map((_t, i) => L.zoneAtCell(i === 0 ? 0 : JOURNEY_RINGS[i - 1].outer + 1, 3)),
   L.zoneAtCell(-1000, 777),
 ];
 
