@@ -670,6 +670,12 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 .ma-pf3 { animation-delay: 4s; }
 @keyframes ma-progfill { 0%, 6.7% { opacity: 0; } 11.7%, 33.3% { opacity: 1; } 33.4%, 100% { opacity: 0; } }
 .ma-lv { fill: var(--dim); font-size: 8.5px; font-weight: 800; text-anchor: middle; }
+.ma-lv-on { fill: #12141c; }
+.ma-step-dot { fill: var(--accent); }
+.ma-step { opacity: 0; animation: ma-step 6s step-end infinite; }
+.ma-step2 { animation-delay: 2s; }
+.ma-step3 { animation-delay: 4s; }
+@keyframes ma-step { 0% { opacity: 1; } 33.3%, 100% { opacity: 0; } }
 .ma-ring { fill: #2a3042; }
 .ma-core { fill: #f7d58b; }
 .ma-ring1, .ma-ring2 { transform-box: view-box; transform-origin: 60px 45px; animation: ma-grow 4s ease-out infinite; }
@@ -685,6 +691,8 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 @keyframes ma-light3 { 0%, 100% { fill: #2a3042; } 20%, 45% { fill: #9fc7f0; } }
 @media (prefers-reduced-motion: reduce) {
   .ma-slide, .ma-fill1, .ma-fill2, .ma-fill3, .ma-prog, .ma-pf, .ma-ring1, .ma-ring2, .ma-tile, .ga-grow, .ga-move { animation: none; opacity: 1; }
+  .ma-step { animation: none; }
+  .ma-step1 { opacity: 1; }
 }
 
 /* ---------- mode sheet ---------- */

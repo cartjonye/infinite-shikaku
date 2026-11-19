@@ -78,9 +78,16 @@ export function modeArt(mode: ModeId): string {
             .map(([c, r, w, h], i) => `<rect x="${x0 + c * step}" y="${y0 + r * step}" width="${w * step - gap}" height="${h * step - gap}" rx="2.5" class="${fills[i]}"/>`)
             .join('')}</g>`
         : '';
-      return `${cells(n, n, x0, y0, cell, gap)}${rects}<text x="${60 + slot * 100}" y="85" class="ma-lv">Level ${lv}</text>`;
+      return `${cells(n, n, x0, y0, cell, gap)}${rects}`;
     };
-    return `<svg ${VIEW}><g class="ma-prog">${level(0, 4, 1, true)}${level(1, 5, 2, true)}${level(2, 6, 3, true)}${level(3, 4, 1, false)}</g></svg>`;
+    // level steps under the grid: (1) 2 3, then 1 (2) 3, then 1 2 (3)
+    const steps = [1, 2, 3]
+      .map((lv) => {
+        const x = 44 + (lv - 1) * 16;
+        return `<text x="${x}" y="85" class="ma-lv">${lv}</text><g class="ma-step ma-step${lv}"><circle cx="${x}" cy="82" r="6" class="ma-step-dot"/><text x="${x}" y="85" class="ma-lv ma-lv-on">${lv}</text></g>`;
+      })
+      .join('');
+    return `<svg ${VIEW}><g class="ma-prog">${level(0, 4, 1, true)}${level(1, 5, 2, true)}${level(2, 6, 3, true)}${level(3, 4, 1, false)}</g>${steps}</svg>`;
   }
   if (mode === 'focused') {
     // the same size every time: one grid fills, then slides off as an identical one slides in
