@@ -60,3 +60,16 @@ describe('Singles', () => {
     }
   }, 60000);
 });
+
+describe('Singles level change', () => {
+  it('can keep the solved level drawn during the slide, then drop it', () => {
+    const L = createSinglesLayout('medium');
+    L.setCurrent(3);
+    L.setCurrent(4, true);
+    expect(L.zonesInRect(-1e6, -1e6, 1e6, 1e6)).toEqual([L.levelZone(3), L.levelZone(4)]);
+    L.dropPrevious();
+    expect(L.zonesInRect(-1e6, -1e6, 1e6, 1e6)).toEqual([L.levelZone(4)]);
+    L.setCurrent(5);
+    expect(L.zonesInRect(-1e6, -1e6, 1e6, 1e6)).toEqual([L.levelZone(5)]);
+  });
+});

@@ -36,8 +36,13 @@ export interface SinglesLayout extends WorldLayout {
   /** 1-based level of a zone, or 0 for cells between levels */
   levelOf(z: Zone): number;
   levelZone(level: number): Zone;
-  /** which level is drawn (only one is ever on screen) */
-  setCurrent(level: number): void;
+  /**
+   * Which level is drawn. With `keepPrevious`, the level that was current stays drawn
+   * too, so a level change can slide the solved puzzle out while the next one slides in.
+   */
+  setCurrent(level: number, keepPrevious?: boolean): void;
+  /** stop drawing the previous level (call when the slide has finished) */
+  dropPrevious(): void;
   current(): number;
 }
 
@@ -63,6 +68,7 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
     return zones[level - 1];
   };
   let current = 1;
+  let previous = 0;
 
   const zoneAtCell = (x: number, y: number): Zone => {
     if (x >= 0) {
@@ -92,8 +98,8 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
     },
     zoneAtCell,
     zonesInRect(x0, y0, x1, y1) {
-      const z = levelZone(current);
-      return z.x0 + z.size < x0 || z.x0 > x1 || z.size < y0 || 0 > y1 ? [] : [z];
+      const shown = previous ? [levelZone(previous), levelZone(current)] : [levelZone(current)];
+      return shown.filter((z) => !(z.x0 + z.size < x0 || z.x0 > x1 || z.size < y0 || 0 > y1));
     },
     depthFor: (z) => BASE_DEPTH[difficulty] + Math.max(1, levelByKey.get(z.key) ?? 1) - 1,
     label: (z) => `Level ${levelByKey.get(z.key) ?? 1}`,
@@ -109,8 +115,13 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
     },
     levelOf: (z) => levelByKey.get(z.key) ?? 0,
     levelZone,
-    setCurrent(level) {
-      current = Math.max(1, level);
+    setCurrent(level, keepPrevious = false) {
+      const next = Math.max(1, level);
+      previous = keepPrevious && next !== current ? current : 0;
+      current = next;
+    },
+    dropPrevious() {
+      previous = 0;
     },
     current: () => current,
   };
