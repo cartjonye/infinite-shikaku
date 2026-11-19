@@ -59,18 +59,38 @@ export function guideArt(touch: boolean): string {
 /** Mode cards: a tiny looping picture of how each mode plays. */
 export function modeArt(mode: ModeId): string {
   if (mode === 'classic') {
-    // one puzzle fills up, then slides off as the next one slides in
+    // grids grow level after level: 4×4, 5×5, 6×6, then back to level 1
+    const cell = 9;
+    const gap = 2;
+    const step = cell + gap;
+    const parts: Record<number, [number, number, number, number][]> = {
+      4: [[0, 0, 2, 2], [2, 0, 2, 2], [0, 2, 4, 2]],
+      5: [[0, 0, 3, 2], [3, 0, 2, 3], [0, 2, 3, 3], [3, 3, 2, 2]],
+      6: [[0, 0, 3, 3], [3, 0, 3, 2], [3, 2, 3, 4], [0, 3, 3, 3]],
+    };
+    const fills = ['ma-a', 'ma-b', 'ma-c', 'ma-a'];
+    const level = (slot: number, n: number, lv: number, filled: boolean) => {
+      const span = n * step - gap;
+      const x0 = 60 + slot * 100 - span / 2;
+      const y0 = 40 - span / 2;
+      const rects = filled
+        ? `<g class="ma-pf ma-pf${lv}">${parts[n]
+            .map(([c, r, w, h], i) => `<rect x="${x0 + c * step}" y="${y0 + r * step}" width="${w * step - gap}" height="${h * step - gap}" rx="2.5" class="${fills[i]}"/>`)
+            .join('')}</g>`
+        : '';
+      return `${cells(n, n, x0, y0, cell, gap)}${rects}<text x="${60 + slot * 100}" y="85" class="ma-lv">Level ${lv}</text>`;
+    };
+    return `<svg ${VIEW}><g class="ma-prog">${level(0, 4, 1, true)}${level(1, 5, 2, true)}${level(2, 6, 3, true)}${level(3, 4, 1, false)}</g></svg>`;
+  }
+  if (mode === 'focused') {
+    // the same size every time: one grid fills, then slides off as an identical one slides in
     const grid = (x: number, filled: boolean) =>
       `<g transform="translate(${x} 0)">${cells(3, 3, 0, 18, 16, 3)}${
         filled
-          ? `<rect x="0" y="18" width="35" height="16" rx="3" class="ma-a ma-fill1"/><rect x="38" y="18" width="16" height="35" rx="3" class="ma-b ma-fill2"/><rect x="0" y="37" width="35" height="35" rx="3" class="ma-c ma-fill3"/>`
+          ? `<rect x="0" y="18" width="35" height="16" rx="3" class="ma-a ma-fill1"/><rect x="38" y="18" width="16" height="35" rx="3" class="ma-b ma-fill2"/><rect x="0" y="37" width="35" height="35" rx="3" class="ma-c ma-fill3"/><rect x="38" y="56" width="16" height="16" rx="3" class="ma-a ma-fill3"/>`
           : ''
       }</g>`;
     return `<svg ${VIEW}><g class="ma-slide">${grid(33, true)}${grid(123, false)}</g></svg>`;
-  }
-  if (mode === 'focused') {
-    // the same size again and again: pieces drop in one after another
-    return `<svg ${VIEW}>${cells(4, 4, 30, 9, 15, 3)}<rect x="30" y="9" width="33" height="15" rx="3" class="ma-a ma-pop1"/><rect x="66" y="9" width="15" height="33" rx="3" class="ma-b ma-pop2"/><rect x="30" y="27" width="33" height="33" rx="3" class="ma-c ma-pop3"/><rect x="66" y="45" width="15" height="33" rx="3" class="ma-a ma-pop4"/><rect x="30" y="63" width="33" height="15" rx="3" class="ma-b ma-pop5"/></svg>`;
   }
   if (mode === 'journey') {
     // a small centre with ever bigger rings growing outward

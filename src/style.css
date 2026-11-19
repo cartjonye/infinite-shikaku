@@ -9,6 +9,8 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
+/* hidden always wins over any display rule */
+[hidden] { display: none !important; }
 html, body {
   margin: 0;
   height: 100%;
@@ -101,7 +103,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   box-shadow: 0 8px 30px rgba(255, 207, 110, 0.3);
   animation: pop 0.35s ease-out;
 }
-#continue[hidden] { display: none; }
 @keyframes pop { from { transform: translateY(16px) scale(0.92); opacity: 0; } }
 
 #toast {
@@ -130,7 +131,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   padding: 16px;
   backdrop-filter: blur(4px);
 }
-.modal[hidden] { display: none; }
 .sheet {
   width: min(420px, 100%);
   max-height: calc(100vh - 32px);
@@ -222,7 +222,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 22px;
   line-height: 1;
 }
-.tool-btn[hidden] { display: none; }
 .zoom-stack {
   position: fixed;
   right: 16px;
@@ -258,7 +257,6 @@ body:not(.in-game) #board { filter: blur(3px) brightness(0.55); }
   justify-content: center;
   padding: calc(28px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom));
 }
-.menu[hidden] { display: none; }
 .menu-inner { width: min(460px, 100%); margin: auto 0; }
 .menu-title {
   font-size: clamp(34px, 10vw, 46px);
@@ -293,7 +291,6 @@ body:not(.in-game) #board { filter: blur(3px) brightness(0.55); }
 .mode-save { font-size: 12.5px; color: var(--dim); margin-bottom: 12px; font-variant-numeric: tabular-nums; }
 .mode-actions { display: flex; gap: 8px; }
 .mode-actions button { flex: 1; width: auto; }
-.mode-actions button[hidden] { display: none; }
 .menu-status { min-height: 20px; margin-top: 14px; color: var(--dim); text-align: center; font-size: 14px; }
 .secondary {
   border: 1px solid var(--line);
@@ -386,7 +383,6 @@ body:not(.in-game) #board { filter: blur(3px) brightness(0.55); }
 #toast .pill { margin-left: 8px; }
 
 /* ---------- menu: home and style screens ---------- */
-.menu-screen[hidden] { display: none; }
 .style-list { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
 .style-btn {
   display: flex;
@@ -431,8 +427,6 @@ body:not(.in-game) #board { filter: blur(3px) brightness(0.55); }
   gap: 16px;
   backdrop-filter: blur(8px);
 }
-.run-panel[hidden] { display: none; }
-.field[hidden] { display: none; }
 .field-label { font-size: 12.5px; font-weight: 800; color: var(--dim); margin-bottom: 8px; letter-spacing: 0.02em; }
 .field-desc { font-size: 13.5px; color: #c4c8d6; margin-top: 8px; line-height: 1.4; }
 .seg { display: flex; gap: 6px; background: rgba(255, 255, 255, 0.04); border-radius: 14px; padding: 4px; }
@@ -451,10 +445,8 @@ body:not(.in-game) #board { filter: blur(3px) brightness(0.55); }
 .seg-wrap .seg-btn { flex: 1 0 calc(33% - 6px); }
 .seg-btn[aria-checked='true'] { background: var(--accent); color: #1b1d26; }
 .saved-run { border-top: 1px solid var(--line); padding-top: 14px; }
-.saved-run[hidden] { display: none; }
 .saved-run .pill-row { margin-bottom: 12px; }
 .start-btn { font-size: 17px; padding: 15px; }
-.start-btn[hidden] { display: none; }
 
 /* ---------- run HUD ---------- */
 body.in-run #timer { font-size: 34px; }
@@ -489,7 +481,6 @@ body.in-run #timer { font-size: 34px; }
   background: rgba(10, 12, 18, 0.35);
   pointer-events: all;
 }
-.countdown[hidden] { display: none; }
 .countdown-num {
   font-size: clamp(90px, 30vw, 160px);
   font-weight: 900;
@@ -518,13 +509,10 @@ body.in-run #timer { font-size: 34px; }
   margin-bottom: 10px;
   animation: pop 0.4s ease-out;
 }
-.best-badge[hidden] { display: none; }
 .sheet-pills { margin: -4px 0 14px; }
 /* paused runs hide the board so the pause can't be used to plan ahead */
 body.in-run .modal { backdrop-filter: blur(18px); background: rgba(6, 7, 11, 0.86); }
-.mode-list[hidden] { display: none; }
 .surrender { color: #ff8a7a; border-color: rgba(255, 138, 122, 0.35); }
-.surrender[hidden] { display: none; }
 
 /* ---------- confirm dialog ---------- */
 .confirm-modal { z-index: 40; }
@@ -618,7 +606,6 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 .diff-chip small { font-size: 12px; font-weight: 700; color: var(--dim); font-variant-numeric: tabular-nums; }
 .diff-chip:hover, .diff-chip:focus-visible { border-color: var(--accent); color: var(--accent); }
 #run-world .seg-btn { padding-left: 4px; padding-right: 4px; }
-.run-panel .best-row[hidden] { display: none; }
 
 /* ---------- How to play demo ---------- */
 .guide-art { background: rgba(255, 255, 255, 0.04); border-radius: 18px; padding: 10px; margin: 4px 0 14px; }
@@ -661,7 +648,6 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 .mode-tile-name { font-weight: 900; font-size: 17px; margin-top: 8px; }
 .mode-tile-hook { font-size: 12.5px; color: #c4c8d6; margin-top: 2px; line-height: 1.3; }
 .mode-tile .saved-dot { position: absolute; top: 10px; right: 10px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgba(255, 207, 110, 0.18); }
-.mode-tile .saved-dot[hidden] { display: none; }
 
 .ma-a { fill: #9fc7f0; }
 .ma-b { fill: #f4b6a6; }
@@ -672,12 +658,18 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 .ma-fill3 { animation-delay: 0.7s; }
 @keyframes ma-slide { 0%, 55% { transform: translateX(0); } 75%, 100% { transform: translateX(-90px); } }
 @keyframes ma-fill { 0%, 5% { opacity: 0; } 15%, 100% { opacity: 1; } }
-.ma-pop1, .ma-pop2, .ma-pop3, .ma-pop4, .ma-pop5 { opacity: 0; animation: ma-pop 4s ease-out infinite; }
-.ma-pop2 { animation-delay: 0.4s; }
-.ma-pop3 { animation-delay: 0.8s; }
-.ma-pop4 { animation-delay: 1.2s; }
-.ma-pop5 { animation-delay: 1.6s; }
-@keyframes ma-pop { 0% { opacity: 0; } 8%, 70% { opacity: 1; } 85%, 100% { opacity: 0; } }
+.ma-prog { animation: ma-prog 6s ease-in-out infinite; }
+@keyframes ma-prog {
+  0%, 23.3% { transform: translateX(0); }
+  33.3%, 56.7% { transform: translateX(-100px); }
+  66.7%, 90% { transform: translateX(-200px); }
+  100% { transform: translateX(-300px); }
+}
+.ma-pf { opacity: 0; animation: ma-progfill 6s ease-in-out infinite; }
+.ma-pf2 { animation-delay: 2s; }
+.ma-pf3 { animation-delay: 4s; }
+@keyframes ma-progfill { 0%, 6.7% { opacity: 0; } 11.7%, 33.3% { opacity: 1; } 33.4%, 100% { opacity: 0; } }
+.ma-lv { fill: var(--dim); font-size: 8.5px; font-weight: 800; text-anchor: middle; }
 .ma-ring { fill: #2a3042; }
 .ma-core { fill: #f7d58b; }
 .ma-ring1, .ma-ring2 { transform-box: view-box; transform-origin: 60px 45px; animation: ma-grow 4s ease-out infinite; }
@@ -692,7 +684,7 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 @keyframes ma-light2 { 0%, 100% { fill: #2a3042; } 20%, 45% { fill: #a8dcc0; } }
 @keyframes ma-light3 { 0%, 100% { fill: #2a3042; } 20%, 45% { fill: #9fc7f0; } }
 @media (prefers-reduced-motion: reduce) {
-  .ma-slide, .ma-fill1, .ma-fill2, .ma-fill3, .ma-pop1, .ma-pop2, .ma-pop3, .ma-pop4, .ma-pop5, .ma-ring1, .ma-ring2, .ma-tile, .ga-grow, .ga-move { animation: none; opacity: 1; }
+  .ma-slide, .ma-fill1, .ma-fill2, .ma-fill3, .ma-prog, .ma-pf, .ma-ring1, .ma-ring2, .ma-tile, .ga-grow, .ga-move { animation: none; opacity: 1; }
 }
 
 /* ---------- mode sheet ---------- */
@@ -701,7 +693,6 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 .mode-sheet .sheet-pills { justify-content: center; }
 .mode-sheet h2, .mode-sheet .mode-desc { text-align: center; }
 .mode-option { margin: 12px 0 4px; }
-.mode-option[hidden] { display: none; }
 .coach-modal .sheet { margin-bottom: 0; }
 /* the guide and controls are full centred dialogs */
 .guide h2, .coach h2 { text-align: center; }
