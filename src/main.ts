@@ -905,35 +905,20 @@ function nextSingle(newlyOpen: Zone[]) {
   const next = newlyOpen[0];
   if (!isSingles(L) || !next) return;
   zones.request(next, true);
-  const solved = L.levelZone(L.current());
-  const OUT_MS = 500;
-  const IN_MS = 600;
+  const SLIDE_MS = 750;
   window.setTimeout(() => {
     if (layout !== L || !inGame) return;
-    // Keep the solved level on screen during the change: the camera first pulls back
-    // so both puzzles are in view (the solved one sliding out, the next sliding in),
-    // then settles on the next level.
+    // a plain slide: the solved puzzle stays drawn and moves off as the camera glides
+    // straight to the next one; it is dropped once the slide ends
     L.setCurrent(L.levelOf(next), true);
     lastInteracted = next;
-    const left = solved.x0;
-    const right = next.x0 + next.size;
-    const span = Math.max(right - left, Math.max(solved.size, next.size));
-    const target = camFor(next);
-    const both: Camera = {
-      x: (left + right) / 2,
-      y: Math.max(solved.size, next.size) / 2 + 18 / fitZoom(span),
-      zoom: Math.min(cam.zoom, target.zoom, fitZoom(span)),
-    };
-    playCam([
-      { to: both, dur: OUT_MS },
-      { to: target, dur: IN_MS },
-    ]);
+    playCam([{ to: camFor(next), dur: SLIDE_MS }]);
     dirty = true;
     window.setTimeout(() => {
       if (layout !== L) return;
       L.dropPrevious();
       dirty = true;
-    }, OUT_MS + IN_MS + 50);
+    }, SLIDE_MS + 50);
   }, 600);
 }
 
