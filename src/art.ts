@@ -56,10 +56,55 @@ export function guideArt(touch: boolean): string {
   return `<svg ${VIEW} class="guide-svg">${cells(4, 4, x0, y0, size, gap, [0, 0, '6'])}${cells(1, 1, x0 + 3 * (size + gap), y0 + 3 * (size + gap), size, gap, [0, 0, '2'], 'cc-cell ga-dim')}<rect x="${x0}" y="${y0}" width="${3 * size + 2 * gap}" height="${2 * size + gap}" rx="4" class="cc-rect ga-grow"/>${pointer}</svg>`;
 }
 
+/**
+ * Mode-card timelines. Every animated element in a card runs for the card's
+ * whole cycle with no animation-delay; its stagger lives in its own keyframes.
+ * That keeps every piece locked to one clock, so nothing pops at first paint
+ * or when the loop wraps. All cards share a 3 s beat.
+ */
+const BEAT = 3;
+type Stop = [number, string];
+class Timeline {
+  private rules: string[] = [];
+  private n = 0;
+  constructor(
+    private id: string,
+    private cycle: number,
+  ) {}
+  /** Inline style for an element following these stops (times in seconds). */
+  anim(stops: Stop[], timing = 'ease-in-out', extra = ''): string {
+    const name = `mk-${this.id}-${this.n++}`;
+    const C = this.cycle;
+    const clamped = stops.map(([t, css]): Stop => [Math.min(C, Math.max(0, t)), css]).sort((a, b) => a[0] - b[0]);
+    if (clamped[0][0] > 0) clamped.unshift([0, clamped[0][1]]);
+    if (clamped[clamped.length - 1][0] < C) clamped.push([C, clamped[clamped.length - 1][1]]);
+    const pct = (t: number) => +((t / C) * 100).toFixed(3);
+    this.rules.push(`@keyframes ${name}{${clamped.map(([t, css]) => `${pct(t)}%{${css}}`).join('')}}`);
+    return `style="animation:${name} ${C}s ${timing} infinite;${extra}"`;
+  }
+  /** Shown over [from, to] with a fade in; hidden the rest of the cycle. */
+  show(from: number, to: number, on: string, off: string, fadeIn = 0.2, fadeOut = 0): string {
+    const e = 0.001;
+    const stops: Stop[] = [[0, off], [from, off], [from + fadeIn, on], [to, on], [to + (fadeOut || e), off]];
+    // an interval that ends at the cycle's end must hand over to "off" right there
+    if (to + (fadeOut || e) > this.cycle) stops.splice(3, 2, [this.cycle - (fadeOut || e), on], [this.cycle, off]);
+    return this.anim(stops, fadeOut ? 'ease-in-out' : 'ease-out');
+  }
+  style(): string {
+    return `<style>${this.rules.join('')}</style>`;
+  }
+}
+const OFF = 'opacity:0;transform:scale(.7)';
+const ON = 'opacity:1;transform:scale(1)';
+/** A beat: the grid arrives at 0, pieces land from 0.4 s every 0.3 s, it holds, then slides over 2.5-3 s. */
+const PIECE_AT = (j: number) => 0.4 + 0.3 * j;
+const SLIDE_AT = 2.5;
+
 /** Mode cards: a tiny looping picture of how each mode plays. */
 export function modeArt(mode: ModeId): string {
   if (mode === 'classic') {
     // grids grow level after level: 4×4, 5×5, 6×6, then back to level 1
+    const tl = new Timeline('classic', 3 * BEAT);
     const cell = 9;
     const gap = 2;
     const step = cell + gap;
@@ -69,56 +114,96 @@ export function modeArt(mode: ModeId): string {
       6: [[0, 0, 3, 3], [3, 0, 3, 2], [3, 2, 3, 4], [0, 3, 3, 3]],
     };
     const fills = ['ma-a', 'ma-b', 'ma-c', 'ma-a'];
-    const level = (slot: number, n: number, lv: number, filled: boolean) => {
+    const level = (slot: number, n: number, filled: boolean) => {
       const span = n * step - gap;
       const x0 = 60 + slot * 100 - span / 2;
       const y0 = 40 - span / 2;
+      const t0 = slot * BEAT;
       const rects = filled
-        ? `<g class="ma-pf ma-pf${lv}">${parts[n]
-            .map(([c, r, w, h], i) => `<rect x="${x0 + c * step}" y="${y0 + r * step}" width="${w * step - gap}" height="${h * step - gap}" rx="2.5" class="${fills[i]}"/>`)
-            .join('')}</g>`
+        ? parts[n]
+            .map(
+              ([c, r, w, h], j) =>
+                `<rect x="${x0 + c * step}" y="${y0 + r * step}" width="${w * step - gap}" height="${h * step - gap}" rx="2.5" class="${fills[j]} ma-pop ma-anim" ${tl.show(t0 + PIECE_AT(j), t0 + BEAT, ON, OFF)}/>`,
+            )
+            .join('')
         : '';
       return `${cells(n, n, x0, y0, cell, gap)}${rects}`;
     };
-    // level steps under the grid: (1) 2 3, then 1 (2) 3, then 1 2 (3)
+    const x = (k: number) => `transform:translateX(${-100 * k}px)`;
+    const slide = tl.anim([
+      [0, x(0)], [SLIDE_AT, x(0)], [BEAT, x(1)], [BEAT + SLIDE_AT, x(1)], [2 * BEAT, x(2)], [2 * BEAT + SLIDE_AT, x(2)], [3 * BEAT, x(3)],
+    ]);
+    // level steps under the grid: (1) 2 3, then 1 (2) 3, then 1 2 (3); the dot moves mid-slide
+    const mid = (SLIDE_AT + BEAT) / 2;
+    const dotStops: Stop[][] = [
+      [[0, 'opacity:1'], [mid, 'opacity:1'], [mid + 0.001, 'opacity:0'], [2 * BEAT + mid, 'opacity:0'], [2 * BEAT + mid + 0.001, 'opacity:1']],
+      [[0, 'opacity:0'], [mid, 'opacity:0'], [mid + 0.001, 'opacity:1'], [BEAT + mid, 'opacity:1'], [BEAT + mid + 0.001, 'opacity:0']],
+      [[0, 'opacity:0'], [BEAT + mid, 'opacity:0'], [BEAT + mid + 0.001, 'opacity:1'], [2 * BEAT + mid, 'opacity:1'], [2 * BEAT + mid + 0.001, 'opacity:0']],
+    ];
     const steps = [1, 2, 3]
       .map((lv) => {
-        const x = 44 + (lv - 1) * 16;
-        return `<text x="${x}" y="85" class="ma-lv">${lv}</text><g class="ma-step ma-step${lv}"><circle cx="${x}" cy="82" r="6" class="ma-step-dot"/><text x="${x}" y="85" class="ma-lv ma-lv-on">${lv}</text></g>`;
+        const cx = 44 + (lv - 1) * 16;
+        return `<text x="${cx}" y="85" class="ma-lv">${lv}</text><g class="ma-step ma-anim" ${tl.anim(dotStops[lv - 1], 'linear', lv === 1 ? '' : 'opacity:0')}><circle cx="${cx}" cy="82" r="6" class="ma-step-dot"/><text x="${cx}" y="85" class="ma-lv ma-lv-on">${lv}</text></g>`;
       })
       .join('');
-    return `<svg ${VIEW}><g class="ma-prog">${level(0, 4, 1, true)}${level(1, 5, 2, true)}${level(2, 6, 3, true)}${level(3, 4, 1, false)}</g>${steps}</svg>`;
+    const body = `<g class="ma-anim" ${slide}>${level(0, 4, true)}${level(1, 5, true)}${level(2, 6, true)}${level(3, 4, false)}</g>${steps}`;
+    return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
   }
   if (mode === 'focused') {
     // the same size every time: one grid fills, then slides off as an identical one slides in
+    const tl = new Timeline('focused', BEAT);
+    const pieces: [number, number, number, number, string][] = [
+      [0, 18, 35, 16, 'ma-a'], [38, 18, 16, 35, 'ma-b'], [0, 37, 35, 35, 'ma-c'], [38, 56, 16, 16, 'ma-a'],
+    ];
     const grid = (x: number, filled: boolean) =>
       `<g transform="translate(${x} 0)">${cells(3, 3, 0, 18, 16, 3)}${
         filled
-          ? `<rect x="0" y="18" width="35" height="16" rx="3" class="ma-a ma-fill1"/><rect x="38" y="18" width="16" height="35" rx="3" class="ma-b ma-fill2"/><rect x="0" y="37" width="35" height="35" rx="3" class="ma-c ma-fill3"/><rect x="38" y="56" width="16" height="16" rx="3" class="ma-a ma-fill3"/>`
+          ? pieces
+              .map(([px, py, w, h, cls], j) => `<rect x="${px}" y="${py}" width="${w}" height="${h}" rx="3" class="${cls} ma-pop ma-anim" ${tl.show(PIECE_AT(j), BEAT, ON, OFF)}/>`)
+              .join('')
           : ''
       }</g>`;
-    return `<svg ${VIEW}><g class="ma-slide">${grid(33, true)}${grid(123, false)}</g></svg>`;
+    const slide = tl.anim([[0, 'transform:translateX(0)'], [SLIDE_AT, 'transform:translateX(0)'], [BEAT, 'transform:translateX(-90px)']]);
+    const body = `<g class="ma-anim" ${slide}>${grid(33, true)}${grid(123, false)}</g>`;
+    return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
   }
   if (mode === 'journey') {
-    // a small centre with ever bigger rings growing outward
-    const ring = (n: number, half: number, size: number, cls: string) => {
+    // a small centre, then one bigger ring per beat, then the world resets
+    const tl = new Timeline('journey', 3 * BEAT);
+    const ring = (half: number, size: number, cls: string) => {
       let out = '';
       const steps = Math.round((2 * half) / size);
       for (let i = 0; i < steps; i++)
         for (let j = 0; j < steps; j++) {
           if (i > 0 && i < steps - 1 && j > 0 && j < steps - 1) continue;
-          out += `<rect x="${60 - half + i * size + 1}" y="${45 - half + j * size + 1}" width="${size - 2}" height="${size - 2}" rx="2" class="ma-ring ${cls}"/>`;
+          out += `<rect x="${60 - half + i * size + 1}" y="${45 - half + j * size + 1}" width="${size - 2}" height="${size - 2}" rx="2" class="${cls}"/>`;
         }
-      return n ? `<g class="ma-ring${n}">${out}</g>` : out;
+      return out;
     };
-    return `<svg ${VIEW}>${ring(0, 8, 8, 'ma-core')}${ring(1, 20, 10, '')}${ring(2, 36, 12, '')}</svg>`;
+    const rings: [number, number, string, number][] = [
+      [8, 8, 'ma-core', 0.3],
+      [20, 10, 'ma-ring1', BEAT + 0.3],
+      [36, 12, 'ma-ring2', 2 * BEAT + 0.3],
+    ];
+    const end = 3 * BEAT;
+    const dim = rings.map(([h, s]) => ring(h, s, 'ma-ring')).join('');
+    const lit = rings
+      .map(([h, s, cls, at]) => `<g class="ma-grow ma-anim" ${tl.show(at, end - 0.6, 'opacity:1;transform:scale(1)', 'opacity:0;transform:scale(.85)', 0.4, 0.5)}>${ring(h, s, cls)}</g>`)
+      .join('');
+    return `<svg ${VIEW}>${tl.style()}${dim}${lit}</svg>`;
   }
-  // mosaic: a patchwork of every size, lighting up piece by piece
+  // mosaic: a patchwork of every size lighting up tile by tile until it is whole
+  const tl = new Timeline('mosaic', 3 * BEAT);
   const tiles: [number, number, number][] = [
-    [22, 8, 30], [54, 8, 14], [70, 8, 28], [54, 24, 14], [22, 40, 14], [38, 40, 14], [54, 40, 44], [22, 56, 30], [70, 38, 0],
+    [22, 8, 30], [54, 8, 14], [70, 8, 28], [54, 24, 14], [22, 40, 14], [38, 40, 14], [54, 40, 44], [22, 56, 30],
   ];
-  return `<svg ${VIEW}>${tiles
-    .filter((t) => t[2] > 0)
-    .map(([x, y, s], i) => `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="3" class="ma-tile ma-t${(i % 3) + 1}" style="animation-delay:${i * 0.25}s"/>`)
-    .join('')}</svg>`;
+  const lit = ['ma-b', 'ma-c', 'ma-a'];
+  const end = 3 * BEAT;
+  const body = tiles
+    .map(
+      ([x, y, s], i) =>
+        `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="3" class="ma-tile"/><rect x="${x}" y="${y}" width="${s}" height="${s}" rx="3" class="${lit[i % 3]} ma-anim" ${tl.show(0.5 + 0.75 * i, end - 0.6, 'opacity:1', 'opacity:0', 0.25, 0.5)}/>`,
+    )
+    .join('');
+  return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
 }

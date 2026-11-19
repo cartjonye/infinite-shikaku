@@ -652,47 +652,20 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 .ma-a { fill: #9fc7f0; }
 .ma-b { fill: #f4b6a6; }
 .ma-c { fill: #a8dcc0; }
-.ma-slide { animation: ma-slide 4s ease-in-out infinite; }
-.ma-fill1, .ma-fill2, .ma-fill3 { opacity: 0; animation: ma-fill 4s ease-in-out infinite; }
-.ma-fill2 { animation-delay: 0.35s; }
-.ma-fill3 { animation-delay: 0.7s; }
-@keyframes ma-slide { 0%, 55% { transform: translateX(0); } 75%, 100% { transform: translateX(-90px); } }
-@keyframes ma-fill { 0%, 5% { opacity: 0; } 15%, 100% { opacity: 1; } }
-.ma-prog { animation: ma-prog 6s ease-in-out infinite; }
-@keyframes ma-prog {
-  0%, 23.3% { transform: translateX(0); }
-  33.3%, 56.7% { transform: translateX(-100px); }
-  66.7%, 90% { transform: translateX(-200px); }
-  100% { transform: translateX(-300px); }
-}
-.ma-pf { opacity: 0; animation: ma-progfill 6s ease-in-out infinite; }
-.ma-pf2 { animation-delay: 2s; }
-.ma-pf3 { animation-delay: 4s; }
-@keyframes ma-progfill { 0%, 6.7% { opacity: 0; } 11.7%, 33.3% { opacity: 1; } 33.4%, 100% { opacity: 0; } }
+/* mode-card timelines are generated in art.ts; these only set shapes and colours */
+.ma-pop { transform-box: fill-box; transform-origin: center; }
 .ma-lv { fill: var(--dim); font-size: 8.5px; font-weight: 800; text-anchor: middle; }
 .ma-lv-on { fill: #12141c; }
 .ma-step-dot { fill: var(--accent); }
-.ma-step { opacity: 0; animation: ma-step 6s step-end infinite; }
-.ma-step2 { animation-delay: 2s; }
-.ma-step3 { animation-delay: 4s; }
-@keyframes ma-step { 0% { opacity: 1; } 33.3%, 100% { opacity: 0; } }
 .ma-ring { fill: #2a3042; }
 .ma-core { fill: #f7d58b; }
-.ma-ring1, .ma-ring2 { transform-box: view-box; transform-origin: 60px 45px; animation: ma-grow 4s ease-out infinite; }
-.ma-ring1 .ma-ring { fill: #9fc7f0; }
-.ma-ring2 .ma-ring { fill: #c9b3ef; }
-.ma-ring2 { animation-delay: 0.6s; }
-@keyframes ma-grow { 0% { opacity: 0; transform: scale(0.6); } 20%, 75% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }
-.ma-tile { fill: #2a3042; animation: ma-light 3s ease-in-out infinite; }
-@keyframes ma-light { 0%, 100% { fill: #2a3042; } 20%, 45% { fill: #f4b6a6; } }
-.ma-t2 { animation-name: ma-light2; }
-.ma-t3 { animation-name: ma-light3; }
-@keyframes ma-light2 { 0%, 100% { fill: #2a3042; } 20%, 45% { fill: #a8dcc0; } }
-@keyframes ma-light3 { 0%, 100% { fill: #2a3042; } 20%, 45% { fill: #9fc7f0; } }
+.ma-ring1 { fill: #9fc7f0; }
+.ma-ring2 { fill: #c9b3ef; }
+.ma-grow { transform-box: view-box; transform-origin: 60px 45px; }
+.ma-tile { fill: #2a3042; }
 @media (prefers-reduced-motion: reduce) {
-  .ma-slide, .ma-fill1, .ma-fill2, .ma-fill3, .ma-prog, .ma-pf, .ma-ring1, .ma-ring2, .ma-tile, .ga-grow, .ga-move { animation: none; opacity: 1; }
-  .ma-step { animation: none; }
-  .ma-step1 { opacity: 1; }
+  .ma-anim { animation: none !important; }
+  .ga-grow, .ga-move { animation: none; opacity: 1; }
 }
 
 /* ---------- mode sheet ---------- */
