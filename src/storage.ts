@@ -10,7 +10,7 @@ const KEYS: Record<ModeId, string> = {
   classic: 'infinite-shikaku:classic:v4',
   fixed: 'infinite-shikaku:fixed:v2',
   mosaic: 'infinite-shikaku:mosaic:v2',
-  singles: 'infinite-shikaku:singles:v1',
+  singles: 'infinite-shikaku:singles:v2',
 };
 const LAST_MODE_KEY = 'infinite-shikaku:last-mode';
 // Saves made before the puzzle generator changed no longer match their worlds.
@@ -20,6 +20,7 @@ const LEGACY_KEYS = [
   'infinite-shikaku:v3',
   'infinite-shikaku:fixed:v1',
   'infinite-shikaku:mosaic:v1',
+  'infinite-shikaku:singles:v1',
 ];
 
 export interface SizeStats {

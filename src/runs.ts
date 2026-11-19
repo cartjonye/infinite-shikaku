@@ -141,7 +141,7 @@ export function isBetter(style: RunStyle, a: RunRecord, b: RunRecord | null | un
 const RECORDS_KEY = 'infinite-shikaku:records:v1';
 const PREFS_KEY = 'infinite-shikaku:run-prefs:v1';
 const survivalKey = (world: ModeId, tileSize?: number, difficulty?: Difficulty) =>
-  `infinite-shikaku:survival:${worldId(world, tileSize, difficulty)}:v1`;
+  `infinite-shikaku:survival:${worldId(world, tileSize, difficulty)}:${world === 'singles' ? 'v2' : 'v1'}`;
 
 function read<T>(key: string): T | null {
   try {

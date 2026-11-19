@@ -2,9 +2,11 @@
  * Singles: one Shikaku at a time, level after level.
  *
  * Each difficulty has a 10-level pattern of grid sizes that repeats forever; every
- * level is a little harder than the one before. Levels sit in a row along the x axis
- * (with a gap between them) so every level keeps its own zone key, but only the
- * current level is ever returned for drawing.
+ * level is a little harder than the one before. Levels sit in a row along the x axis,
+ * centred on the same line (y = 0) with a gap between them, so moving from one level
+ * to the next is a straight horizontal slide even when the sizes differ. Every level
+ * keeps its own zone key, but only the current level is drawn (plus the previous one
+ * while the slide is running).
  */
 import { ZonePool, type WorldLayout, type Zone } from './types';
 
@@ -57,7 +59,7 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
       const n = zones.length + 1;
       const size = singlesSize(difficulty, n);
       const x0 = starts[n - 1];
-      const z = pool.get(size, x0, 0);
+      const z = pool.get(size, x0, -Math.floor(size / 2));
       zones.push(z);
       levelByKey.set(z.key, n);
       starts.push(x0 + size + GAP);
@@ -82,7 +84,7 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
         else hi = mid - 1;
       }
       const z = zones[lo];
-      if (x < z.x0 + z.size && y >= 0 && y < z.size) return z;
+      if (x < z.x0 + z.size && y >= z.y0 && y < z.y0 + z.size) return z;
     }
     // between levels: an inert cell that is never drawn or opened
     return voids.get(1, x, y);
@@ -94,12 +96,12 @@ export function createSinglesLayout(difficulty: Difficulty): SinglesLayout {
     origin: levelZone(1),
     get centre(): [number, number] {
       const z = levelZone(current);
-      return [z.x0 + z.size / 2, z.size / 2];
+      return [z.x0 + z.size / 2, z.y0 + z.size / 2];
     },
     zoneAtCell,
     zonesInRect(x0, y0, x1, y1) {
       const shown = previous ? [levelZone(previous), levelZone(current)] : [levelZone(current)];
-      return shown.filter((z) => !(z.x0 + z.size < x0 || z.x0 > x1 || z.size < y0 || 0 > y1));
+      return shown.filter((z) => !(z.x0 + z.size < x0 || z.x0 > x1 || z.y0 + z.size < y0 || z.y0 > y1));
     },
     depthFor: (z) => BASE_DEPTH[difficulty] + Math.max(1, levelByKey.get(z.key) ?? 1) - 1,
     label: (z) => `Level ${levelByKey.get(z.key) ?? 1}`,

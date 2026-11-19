@@ -29,9 +29,12 @@ describe('Singles', () => {
         const p = L.levelZone(n - 1);
         expect(z.x0).toBeGreaterThan(p.x0 + p.size);
       }
-      for (const [x, y] of [[z.x0, 0], [z.x0 + z.size - 1, z.size - 1], [z.x0 + 3, 2]]) expect(L.zoneAtCell(x, y)).toBe(z);
+      for (const [x, y] of [[z.x0, z.y0], [z.x0 + z.size - 1, z.y0 + z.size - 1], [z.x0 + 3, z.y0 + 2]]) expect(L.zoneAtCell(x, y)).toBe(z);
       expect(L.zoneAtCell(z.x0 + z.size, 0)).not.toBe(z);
       expect(L.levelOf(L.zoneAtCell(z.x0 + z.size, 0))).toBe(0);
+      expect(L.levelOf(L.zoneAtCell(z.x0, z.y0 - 1))).toBe(0);
+      // every level is centred on the same line, so the slide between sizes stays level
+      expect(Math.abs(z.y0 + z.size / 2)).toBeLessThanOrEqual(0.5);
     }
   });
 

@@ -1430,7 +1430,8 @@ function frame(now: number) {
     const { from, to } = camAnim;
     cam.x = from.x + (to.x - from.x) * e;
     cam.y = from.y + (to.y - from.y) * e;
-    cam.zoom = from.zoom + (to.zoom - from.zoom) * e;
+    // scale changes feel even when blended proportionally, not linearly
+    cam.zoom = from.zoom * Math.pow(to.zoom / from.zoom, e);
     if (now - camAnim.t0 >= camAnim.dur + camAnim.hold) {
       nextCamStep();
       if (!camAnim) {
