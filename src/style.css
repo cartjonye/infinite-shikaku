@@ -46,16 +46,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
   pointer-events: none;
 }
 .hud-top > * { pointer-events: auto; }
-.brand {
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  font-size: 15px;
-  display: flex;
-  flex-direction: column;
-  line-height: 1.05;
-  color: var(--dim);
-}
-.brand span { color: var(--accent); font-size: 17px; }
+.hud-mode { display: flex; flex-direction: column; line-height: 1.05; min-width: 0; }
+.hm-style { font-size: 10.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); margin-bottom: 2px; }
+.hm-word { font-size: 17px; font-weight: 900; letter-spacing: 0.01em; color: var(--text); white-space: nowrap; }
+.hm-gold { color: var(--accent); }
+/* Mosaic: every letter its own colour, like a patchwork */
+.mz0 { color: #9fc7f0; }
+.mz1 { color: #f4b6a6; }
+.mz2 { color: #a8dcc0; }
+.mz3 { color: #ffcf6e; }
+.mz4 { color: #c9b3ef; }
 .zone-info { text-align: center; }
 #zone-label { font-size: 13px; color: var(--dim); white-space: nowrap; }
 #timer {
@@ -170,8 +170,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .stat-k { font-size: 12.5px; color: var(--dim); margin-top: 2px; }
 
 @media (max-width: 420px) {
-  .brand { font-size: 12px; }
-  .brand span { font-size: 14px; }
+  .hm-word { font-size: 14px; }
+  .hm-style { font-size: 9.5px; }
   #timer { font-size: 24px; }
   .icon-btn, .solved-pill { width: 34px; height: 34px; min-width: 34px; border-radius: 10px; }
   .actions { gap: 6px; }
@@ -248,7 +248,8 @@ body:not(.in-game) .hud-top,
 body:not(.in-game) .zoom-stack,
 body:not(.in-game) .hud-bottom,
 body:not(.in-game) .tool-btn.easier { display: none; }
-body:not(.in-game) #board { filter: blur(3px) brightness(0.55); }
+/* the board behind the menu: soft and dark enough that the title always reads */
+body:not(.in-game) #board { filter: blur(12px) brightness(0.38) saturate(0.8); }
 .menu {
   position: fixed;
   inset: 0;
@@ -258,6 +259,9 @@ body:not(.in-game) #board { filter: blur(3px) brightness(0.55); }
   padding: calc(28px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom));
 }
 .menu-inner { width: min(460px, 100%); margin: auto 0; }
+.menu { background: radial-gradient(ellipse 80% 55% at 50% 30%, rgba(10, 11, 16, 0.55), rgba(10, 11, 16, 0) 75%); }
+.menu-logo { width: 76px; height: 76px; margin: 0 0 12px; }
+.menu-logo svg { width: 100%; height: 100%; display: block; }
 .menu-title {
   font-size: clamp(34px, 10vw, 46px);
   font-weight: 900;
@@ -661,7 +665,6 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 .ma-core { fill: #f7d58b; }
 .ma-ring1 { fill: #9fc7f0; }
 .ma-ring2 { fill: #c9b3ef; }
-.ma-grow { transform-box: view-box; transform-origin: 60px 45px; }
 .ma-tile { fill: #2a3042; }
 @media (prefers-reduced-motion: reduce) {
   .ma-anim { animation: none !important; }
@@ -678,3 +681,53 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 /* the guide and controls are full centred dialogs */
 .guide h2, .coach h2 { text-align: center; }
 .guide p { text-align: center; }
+
+/* ---------- loading mark (world building) ---------- */
+.loading {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(10, 11, 16, 0.72);
+  backdrop-filter: blur(6px);
+}
+.loading-art { width: 96px; height: 96px; }
+.loading-art svg, #boot .boot-art svg { width: 100%; height: 100%; display: block; }
+.loading-text { font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+
+/* ---------- Continue + delete ---------- */
+.continue-row { display: flex; gap: 8px; align-items: stretch; }
+.continue-row > button:first-child { flex: 1; }
+.trash-btn { width: 52px; height: auto; min-height: 46px; flex: 0 0 52px; color: var(--dim); }
+.trash-btn:hover, .trash-btn:focus-visible { color: var(--danger); border-color: rgba(255, 138, 122, 0.4); }
+.mode-actions .continue-row { flex: 1; }
+
+/* saved hint on a difficulty or grid size */
+.seg-btn { position: relative; }
+.seg-dot { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px rgba(255, 207, 110, 0.2); }
+.seg-btn[aria-checked='true'] .seg-dot { background: #1b1d26; box-shadow: none; }
+
+/* ---------- seed (bottom of the pause sheets) ---------- */
+.seed-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 14px;
+  padding: 6px;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  opacity: 0.7;
+  font: 600 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.seed-btn:hover { opacity: 1; }
+.seed-btn.copied { color: var(--accent); opacity: 1; }
+.seed-btn.copied svg { display: none; }

@@ -1,9 +1,10 @@
 /**
- * Save persistence (through kv: localStorage on the web, native storage in the app), one save per game mode.
+ * Save persistence (through kv: localStorage on the web, native storage in the app):
+ * one save per mode and option, e.g. Classic Hard and Classic Easy are separate saves.
  * Every access is guarded so the game still runs (without saving) when storage is unavailable.
  */
 import { kv, KEY_PREFIX } from './kv';
-import { zoneByKey, type Difficulty, type ModeId, type WorldLayout } from './layouts';
+import { DIFFICULTIES, FOCUSED_SIZES, zoneByKey, type Difficulty, type ModeId, type WorldLayout } from './layouts';
 import type { Rect } from './types';
 
 /**
@@ -12,13 +13,29 @@ import type { Rect } from './types';
  * the controls card flag): older data uses mode names and layouts that no longer exist.
  */
 export const PREFIX = KEY_PREFIX;
-export const SCHEMA = 5;
+export const SCHEMA = 6;
 const SCHEMA_KEY = `${PREFIX}schema`;
 export const SAVE_VERSION = SCHEMA;
 
-/** One Infinity save per mode. */
-const saveKey = (mode: ModeId) => `${PREFIX}infinity:${mode}`;
-const LAST_MODE_KEY = `${PREFIX}last-mode`;
+/** Mode options: the difficulty for Classic, the grid size for Focused. */
+export interface ModeOptions {
+  difficulty?: Difficulty;
+  size?: number;
+}
+
+/** Mode plus its option, e.g. "classic-hard", "focused-12", "mosaic". */
+export const modeVariant = (mode: ModeId, opts: ModeOptions = {}) =>
+  mode === 'classic' ? `classic-${opts.difficulty ?? 'easy'}` : mode === 'focused' ? `focused-${opts.size ?? 8}` : mode;
+
+/** Every option a mode offers (World modes have none). */
+export function modeOptionsList(mode: ModeId): ModeOptions[] {
+  if (mode === 'classic') return DIFFICULTIES.map((difficulty) => ({ difficulty }));
+  if (mode === 'focused') return FOCUSED_SIZES.map((size) => ({ size }));
+  return [{}];
+}
+
+/** One Infinity save per mode and option. */
+const saveKey = (mode: ModeId, opts: ModeOptions = {}) => `${PREFIX}infinity:${modeVariant(mode, opts)}`;
 
 export interface SizeStats {
   solved: number;
@@ -74,12 +91,6 @@ export const emptyStats = (): Stats => ({
   farthestM: 0,
   totalPlayMs: 0,
 });
-
-/** Mode options: the difficulty for Classic, the grid size for Focused. */
-export interface ModeOptions {
-  difficulty?: Difficulty;
-  size?: number;
-}
 
 export function freshSave(mode: ModeId, opts: ModeOptions = {}): SaveData {
   return {
@@ -139,10 +150,14 @@ export function ensureSchema(): boolean {
 }
 ensureSchema();
 
-export function loadSave(mode: ModeId): SaveData | null {
-  const d = read(saveKey(mode));
-  if (!isValid(d, mode)) return null;
-  return { ...freshSave(mode), ...d, mode, stats: { ...emptyStats(), ...d.stats } };
+/** The options a save was made with (only the field that matters for its mode). */
+export const saveOptions = (d: { mode: ModeId; size?: number; difficulty?: Difficulty }): ModeOptions =>
+  d.mode === 'classic' ? { difficulty: d.difficulty ?? 'easy' } : d.mode === 'focused' ? { size: d.size ?? 8 } : {};
+
+export function loadSave(mode: ModeId, opts: ModeOptions = {}): SaveData | null {
+  const d = read(saveKey(mode, opts));
+  if (!isValid(d, mode) || modeVariant(mode, saveOptions(d)) !== modeVariant(mode, opts)) return null;
+  return { ...freshSave(mode, opts), ...d, mode, stats: { ...emptyStats(), ...d.stats } };
 }
 
 /** Drop zone keys that do not exist in this layout (corrupt or foreign data). */
@@ -166,16 +181,11 @@ export function writeSave(d: SaveData): boolean {
   } catch {
     return false;
   }
-  return kv.set(saveKey(d.mode), json) && kv.set(LAST_MODE_KEY, d.mode);
+  return kv.set(saveKey(d.mode, saveOptions(d)), json);
 }
 
-export function clearSave(mode: ModeId) {
-  remove(saveKey(mode));
-}
-
-export function lastMode(): ModeId | null {
-  const m = kv.get(LAST_MODE_KEY);
-  return m === 'classic' || m === 'focused' || m === 'journey' || m === 'mosaic' ? m : null;
+export function clearSave(mode: ModeId, opts: ModeOptions = {}) {
+  remove(saveKey(mode, opts));
 }
 
 export interface SaveSummary {
@@ -188,8 +198,8 @@ export interface SaveSummary {
   difficulty?: Difficulty;
 }
 
-export function summarize(mode: ModeId): SaveSummary | null {
-  const d = loadSave(mode);
+export function summarize(mode: ModeId, opts: ModeOptions = {}): SaveSummary | null {
+  const d = loadSave(mode, opts);
   if (!d) return null;
   return {
     zonesSolved: d.stats.zonesSolved,
@@ -200,4 +210,50 @@ export function summarize(mode: ModeId): SaveSummary | null {
     size: d.size,
     difficulty: d.difficulty,
   };
+}
+
+/** The options of a mode that have a save, most recently played first. */
+export function savedOptions(mode: ModeId): { opts: ModeOptions; summary: SaveSummary }[] {
+  return modeOptionsList(mode)
+    .map((opts) => ({ opts, summary: summarize(mode, opts) }))
+    .filter((x): x is { opts: ModeOptions; summary: SaveSummary } => x.summary !== null)
+    .sort((a, b) => b.summary.lastPlayed - a.summary.lastPlayed);
+}
+
+// ---------- seed codes ----------
+// (version)(mode, 2 chars)(option, 2 chars)_(seed in base 36), e.g. 6CLHA_1K9ZQ3.
+// Everything before "_" is readable at a glance; the part after it is the world seed.
+const MODE_CODES: Record<ModeId, string> = { classic: 'CL', focused: 'FC', journey: 'JO', mosaic: 'MO' };
+const DIFF_CODES: Record<Difficulty, string> = { easy: 'EA', medium: 'ME', hard: 'HA', expert: 'EX' };
+
+export function seedCode(d: { mode: ModeId; seed: number; size?: number; difficulty?: Difficulty }, version = SCHEMA): string {
+  const o = saveOptions(d);
+  const opt = d.mode === 'classic' ? DIFF_CODES[o.difficulty!] : d.mode === 'focused' ? String(o.size).padStart(2, '0') : '00';
+  return `${version}${MODE_CODES[d.mode]}${opt}_${(d.seed >>> 0).toString(36).toUpperCase()}`;
+}
+
+export interface ParsedSeed {
+  version: number;
+  mode: ModeId;
+  opts: ModeOptions;
+  seed: number;
+}
+export function parseSeedCode(code: string): ParsedSeed | null {
+  const m = /^(\d{1,4})([A-Z]{2})([A-Z0-9]{2})_([0-9A-Z]{1,7})$/.exec(code.trim().toUpperCase());
+  if (!m) return null;
+  const mode = (Object.keys(MODE_CODES) as ModeId[]).find((k) => MODE_CODES[k] === m[2]);
+  if (!mode) return null;
+  let opts: ModeOptions = {};
+  if (mode === 'classic') {
+    const difficulty = (Object.keys(DIFF_CODES) as Difficulty[]).find((k) => DIFF_CODES[k] === m[3]);
+    if (!difficulty) return null;
+    opts = { difficulty };
+  } else if (mode === 'focused') {
+    const size = Number(m[3]);
+    if (!FOCUSED_SIZES.includes(size)) return null;
+    opts = { size };
+  } else if (m[3] !== '00') return null;
+  const seed = parseInt(m[4], 36);
+  if (!Number.isFinite(seed) || seed > 0xffffffff) return null;
+  return { version: Number(m[1]), mode, opts, seed };
 }

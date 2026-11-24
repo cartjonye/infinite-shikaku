@@ -1,7 +1,6 @@
-import './style.css';
 import { kv } from './kv';
 import { setupNative } from './native';
-import { controlArt, guideArt, modeArt, type ControlKind } from './art';
+import { brandArt, controlArt, guideArt, modeArt, type ControlKind } from './art';
 import {
   DIFFICULTIES,
   DIFFICULTY_NAMES,
@@ -30,6 +29,10 @@ import {
   freshSave,
   loadSave,
   sanitize,
+  modeVariant,
+  saveOptions,
+  savedOptions,
+  seedCode,
   summarize,
   writeSave,
   type ModeOptions,
@@ -603,7 +606,18 @@ function updateHud() {
   if (!inGame) return;
   const f = focusZone();
   const running = timerRunning();
-  if (f) {
+  if (isSingles(layout)) {
+    // the camera crosses the gap between levels while sliding: always describe the level itself
+    const z = layout.levelZone(layout.current());
+    if (world.status(z) === 'solved') {
+      setHtml(zoneLabel, pills([layout.label(z), ['Solved', 'gold']]));
+      timerEl.classList.add('idle');
+    } else {
+      setHtml(zoneLabel, pills([layout.label(z), `${z.size}×${z.size}`]));
+      timerEl.textContent = fmt(save.timers[z.key] ?? 0);
+      timerEl.classList.toggle('idle', running !== z);
+    }
+  } else if (f) {
     setHtml(
       zoneLabel,
       playableZoom() ? pills([layout.label(f), `${f.size}×${f.size}`]) : pills([['Zoom in to play', 'gold']]),
@@ -784,12 +798,29 @@ function readyUp(sub?: string) {
 }
 const STYLE_NAMES: Record<PlayStyle, string> = { infinity: 'Infinity', timeattack: 'Time Attack', survival: 'Survival' };
 /** "Classic" + its difficulty, "Focused" + its size, or just the World mode's name. */
+/** "Classic Hard", "Focused 12×12", "Journey". */
+function modeName(mode: ModeId, opts: ModeOptions = {}): string {
+  if (mode === 'classic') return `Classic ${DIFFICULTY_NAMES[opts.difficulty ?? 'easy']}`;
+  if (mode === 'focused') return `Focused ${opts.size ?? 8}×${opts.size ?? 8}`;
+  return MODE_NAMES[mode];
+}
+/** Top-left of the HUD: the mode as a two-tone wordmark (Mosaic is a patchwork of colours). */
+function renderHudMode(mode: ModeId, opts: ModeOptions, style?: PlayStyle) {
+  let word: string;
+  if (mode === 'mosaic') word = [...'Mosaic'].map((ch, i) => `<span class="mz${i % 5}">${ch}</span>`).join('');
+  else if (mode === 'journey') word = '<span class="hm-gold">Journey</span>';
+  else
+    word = `${MODE_NAMES[mode]} <span class="hm-gold">${
+      mode === 'classic' ? DIFFICULTY_NAMES[opts.difficulty ?? 'easy'] : `${opts.size ?? 8}×${opts.size ?? 8}`
+    }</span>`;
+  $('#hud-mode').innerHTML = `${style && style !== 'infinity' ? `<div class="hm-style">${STYLE_NAMES[style]}</div>` : ''}<div class="hm-word">${word}</div>`;
+}
+
 function modePills(mode: ModeId, opts: ModeOptions = {}): (string | [string, string])[] {
   if (mode === 'classic') return [['Classic', 'gold'], DIFFICULTY_NAMES[opts.difficulty ?? 'easy']];
   if (mode === 'focused') return [['Focused', 'gold'], `${opts.size ?? 8}×${opts.size ?? 8}`];
   return [[MODE_NAMES[mode], 'gold']];
 }
-const saveOptions = (d: SaveData): ModeOptions => ({ difficulty: d.difficulty, size: d.size });
 function renderStats() {
   const st = save.stats;
   // total area of every solved zone, in square cells (1 cell = 1 m)
@@ -823,10 +854,56 @@ function renderStats() {
 const statGrid = (rows: [string, string][]) =>
   rows.map(([k, v]) => `<div class="stat"><div class="stat-v">${esc(v)}</div><div class="stat-k">${esc(k)}</div></div>`).join('');
 
+// ---------- seed (bottom of the pause sheets): tap to copy ----------
+let seedResetTimer: number | undefined;
+function showSeed() {
+  window.clearTimeout(seedResetTimer);
+  const code = seedCode(save);
+  document.querySelectorAll<HTMLElement>('[data-seed]').forEach((b) => {
+    b.dataset.code = code;
+    b.classList.remove('copied');
+    b.querySelector('.seed-label')!.textContent = `Seed ${code}`;
+  });
+}
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // older WebViews: copy through a hidden text field
+    const t = document.createElement('textarea');
+    t.value = text;
+    t.setAttribute('readonly', '');
+    t.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+    document.body.appendChild(t);
+    t.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+    t.remove();
+    return ok;
+  }
+}
+document.querySelectorAll<HTMLElement>('[data-seed]').forEach((b) =>
+  b.addEventListener('click', async () => {
+    const code = b.dataset.code;
+    if (!code) return;
+    const ok = await copyText(code);
+    b.querySelector('.seed-label')!.textContent = ok ? 'Copied' : code;
+    b.classList.toggle('copied', ok);
+    window.clearTimeout(seedResetTimer);
+    seedResetTimer = window.setTimeout(showSeed, 1500);
+  }),
+);
+
 function openPause() {
   if (!inGame || runPhase === 'over' || countdownActive) return;
   if (run) return openRunPause();
   renderStats();
+  showSeed();
   pauseModal.hidden = false;
   saveNow();
 }
@@ -931,18 +1008,22 @@ function nextSingle(newlyOpen: Zone[]) {
 }
 
 async function startSession(d: SaveData) {
-  menuStatus('Building your world…');
+  menuStatus('');
+  showLoading('Building your world');
   let L: WorldLayout;
   try {
     L = await makeLayout(d);
   } catch {
+    hideLoading();
     menuStatus("Couldn't build your world. Check your connection and try again.");
     return;
+  } finally {
+    hideLoading();
   }
-  menuStatus('');
   setSession(L, d, true);
   run = null;
   runPhase = null;
+  renderHudMode(d.mode, saveOptions(d));
   inGame = true;
   document.body.classList.add('in-game');
   document.body.classList.remove('in-run');
@@ -978,16 +1059,16 @@ function endSession() {
 async function newGame(m: ModeId, opts: ModeOptions = {}) {
   const what = MODE_FAMILY[m] === 'singles' ? 'progress' : 'world';
   if (
-    summarize(m) &&
+    summarize(m, opts) &&
     !(await askConfirm({
       title: `Start ${what === 'world' ? 'a fresh world' : 'over'}?`,
-      body: `Your current ${MODE_NAMES[m]} ${what} will be lost.`,
+      body: `Your current ${modeName(m, opts)} ${what} will be lost.`,
       ok: 'Start fresh',
       danger: true,
     }))
   )
     return;
-  clearSave(m);
+  clearSave(m, opts);
   startSession(freshSave(m, opts));
 }
 
@@ -1030,19 +1111,23 @@ function startCountdown(sub: string) {
 
 async function startRun(r: RunState, resume?: SaveData) {
   const d = resume ?? { ...freshSave(r.mode, runOptions(r)), seenHelp: true };
-  menuStatus('Building your world…');
+  menuStatus('');
+  showLoading('Building your world');
   let L: WorldLayout;
   try {
     L = await makeLayout(d);
   } catch {
+    hideLoading();
     menuStatus("Couldn't build your world. Check your connection and try again.");
     return;
+  } finally {
+    hideLoading();
   }
-  menuStatus('');
   resultsModal.hidden = true;
   closeModals();
   setSession(L, d, !!resume);
   run = r;
+  renderHudMode(r.mode, runOptions(r), r.style);
   inGame = true;
   document.body.classList.add('in-game', 'in-run');
   menuEl.hidden = true;
@@ -1107,6 +1192,7 @@ function runPills(r: RunState): (string | [string, string])[] {
 function openRunPause() {
   if (!run) return;
   saveNow();
+  showSeed();
   $('#run-pause-sub').innerHTML = pills(runPills(run));
   const rows: [string, string][] = [
     ['Time left', clock(run.clockMs)],
@@ -1223,6 +1309,21 @@ let menuStyle: PlayStyle | null = null;
 function menuStatus(msg: string) {
   $('#menu-status').textContent = msg;
 }
+/** The loading mark over everything, for waits such as building a world. Shown only if the wait is noticeable. */
+const loadingEl = $('#loading');
+let loadingTimer: number | undefined;
+function showLoading(text: string) {
+  window.clearTimeout(loadingTimer);
+  loadingTimer = window.setTimeout(() => {
+    $('#loading .loading-art').innerHTML = brandArt();
+    $('#loading .loading-text').textContent = text;
+    loadingEl.hidden = false;
+  }, 150);
+}
+function hideLoading() {
+  window.clearTimeout(loadingTimer);
+  loadingEl.hidden = true;
+}
 function ago(t: number) {
   const m = Math.round((Date.now() - t) / 60000);
   if (m < 1) return 'Just now';
@@ -1271,22 +1372,32 @@ function renderModeCards(container: HTMLElement, opts: { selected?: ModeId; save
 
 // ----- Infinity: cards open a mode sheet with Continue / New -----
 function renderInfinity() {
-  renderModeCards($('#infinity-panel'), { saved: (m) => !!summarize(m) });
+  renderModeCards($('#infinity-panel'), { saved: (m) => savedOptions(m).length > 0 });
 }
 $('#infinity-panel').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('.mode-tile');
   if (b) openModeSheet(b.dataset.mode as ModeId);
 });
 
+/** The option of the mode sheet (only the field that matters for the mode). */
 let sheetMode: ModeId = 'classic';
-let sheetOpts: ModeOptions = { difficulty: 'easy', size: 8 };
+let sheetPick: ModeOptions = { difficulty: 'easy', size: 8 };
+const sheetOpts = (): ModeOptions => saveOptions({ mode: sheetMode, ...sheetPick });
 function openModeSheet(m: ModeId) {
   sheetMode = m;
-  const sum = summarize(m);
-  sheetOpts = { difficulty: sum?.difficulty ?? sheetOpts.difficulty ?? 'easy', size: sum?.size ?? sheetOpts.size ?? 8 };
+  // open on the most recently played option of this mode
+  const last = savedOptions(m)[0]?.opts;
+  if (last) sheetPick = { ...sheetPick, ...last };
   $('#mode-sheet-art').innerHTML = modeArt(m);
   $('#mode-sheet-title').textContent = MODE_NAMES[m];
   $('#mode-sheet-desc').textContent = MODE_DESCRIPTIONS[m];
+  renderSheet();
+  modeSheet.hidden = false;
+}
+/** Save pills, Continue / delete / New and the option picker, for the selected option. */
+function renderSheet() {
+  const m = sheetMode;
+  const sum = summarize(m, sheetOpts());
   $('#mode-sheet-save').innerHTML = sum
     ? pills([
         ...(m === 'classic' ? [[DIFFICULTY_NAMES[sum.difficulty ?? 'easy'], 'gold'] as [string, string]] : []),
@@ -1297,47 +1408,58 @@ function openModeSheet(m: ModeId) {
         [ago(sum.lastPlayed), 'dim'],
       ])
     : pills([['Not started yet', 'dim']]);
-  $<HTMLButtonElement>('#btn-mode-continue').hidden = !sum;
+  $('#mode-continue-row').hidden = !sum;
   $('#btn-mode-new').textContent = sum ? 'New' : 'Start';
   $('#btn-mode-new').className = sum ? 'secondary' : 'primary';
   renderSheetOption();
-  modeSheet.hidden = false;
 }
-/** Classic picks a difficulty, Focused a grid size; World modes have no option. */
+/** Classic picks a difficulty, Focused a grid size, each with its own save (gold dot). */
 function renderSheetOption() {
   const box = $('#mode-sheet-option');
   box.hidden = MODE_FAMILY[sheetMode] !== 'singles';
   if (box.hidden) return;
   const seg = $('#mode-sheet-option-seg');
+  const saved = new Set(savedOptions(sheetMode).map((x) => modeVariant(sheetMode, x.opts)));
+  const dot = (o: ModeOptions) => (saved.has(modeVariant(sheetMode, o)) ? '<span class="seg-dot" title="Saved game"></span>' : '');
   if (sheetMode === 'classic') {
-    $('#mode-sheet-option-label').textContent = 'Challenge for a new game';
+    $('#mode-sheet-option-label').textContent = 'Challenge';
     seg.innerHTML = DIFFICULTIES.map(
       (d) =>
-        `<button class="seg-btn" data-diff="${d}" role="radio" aria-checked="${sheetOpts.difficulty === d}">${DIFFICULTY_NAMES[d]}</button>`,
+        `<button class="seg-btn" data-diff="${d}" role="radio" aria-checked="${sheetPick.difficulty === d}">${DIFFICULTY_NAMES[d]}${dot({ difficulty: d })}</button>`,
     ).join('');
   } else {
-    $('#mode-sheet-option-label').textContent = 'Grid for a new game';
+    $('#mode-sheet-option-label').textContent = 'Grid';
     seg.innerHTML = FOCUSED_SIZES.map(
-      (n) => `<button class="seg-btn" data-size="${n}" role="radio" aria-checked="${sheetOpts.size === n}">${n}×${n}</button>`,
+      (n) => `<button class="seg-btn" data-size="${n}" role="radio" aria-checked="${sheetPick.size === n}">${n}×${n}${dot({ size: n })}</button>`,
     ).join('');
   }
 }
 $('#mode-sheet-option-seg').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('.seg-btn');
   if (!b) return;
-  if (b.dataset.diff) sheetOpts.difficulty = b.dataset.diff as Difficulty;
-  if (b.dataset.size) sheetOpts.size = Number(b.dataset.size);
-  renderSheetOption();
+  if (b.dataset.diff) sheetPick.difficulty = b.dataset.diff as Difficulty;
+  if (b.dataset.size) sheetPick.size = Number(b.dataset.size);
+  renderSheet();
 });
 $('#btn-mode-continue').addEventListener('click', () => {
-  const d = loadSave(sheetMode);
+  const d = loadSave(sheetMode, sheetOpts());
   if (!d) return;
   modeSheet.hidden = true;
   startSession(d);
 });
 $('#btn-mode-new').addEventListener('click', () => {
   modeSheet.hidden = true;
-  newGame(sheetMode, { ...sheetOpts });
+  newGame(sheetMode, sheetOpts());
+});
+$('#btn-mode-delete').addEventListener('click', async () => {
+  const m = sheetMode;
+  const opts = sheetOpts();
+  const name = modeName(m, opts);
+  if (!(await askConfirm({ title: 'Delete this save?', body: `Your ${name} progress will be gone.`, ok: 'Delete', danger: true })))
+    return;
+  clearSave(m, opts);
+  renderSheet();
+  renderInfinity();
 });
 
 // ----- Time Attack & Survival setup: the same cards pick the mode -----
@@ -1407,6 +1529,14 @@ $('#btn-sv-continue').addEventListener('click', () => {
   const c = choice();
   const slot = loadSurvival(c.mode, choiceOptions(c));
   if (slot) startRun(slot.run, slot.save);
+});
+$('#btn-sv-delete').addEventListener('click', async () => {
+  const c = choice();
+  const name = modeName(c.mode, choiceOptions(c));
+  if (!(await askConfirm({ title: 'Delete this run?', body: `Your ${name} Survival run will be gone.`, ok: 'Delete', danger: true })))
+    return;
+  clearSurvival(c.mode, choiceOptions(c));
+  renderRunPanel();
 });
 $('#btn-sv-new').addEventListener('click', async () => {
   const c = choice();
@@ -1519,9 +1649,17 @@ onResize();
 
 // start on the menu over an idle backdrop
 setSession(layout, save, false);
+$('#menu-logo').innerHTML = brandArt();
 showHome();
 menuEl.hidden = false;
 requestAnimationFrame(frame);
+// everything is in place: reveal the page and fade the loading mark out
+document.body.classList.add('ready');
+const bootEl = document.getElementById('boot');
+if (bootEl) {
+  bootEl.classList.add('gone');
+  window.setTimeout(() => bootEl.remove(), 400);
+}
 
 // debug / test hook
 const zoneOf = (key: string) => zoneByKey(layout, key) ?? layout.origin;

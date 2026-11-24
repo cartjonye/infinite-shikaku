@@ -5,7 +5,7 @@
  */
 import { kv } from './kv';
 import { classicLevelSize, type Difficulty, type ModeId } from './layouts';
-import { PREFIX, type ModeOptions, type SaveData } from './storage';
+import { PREFIX, modeVariant, type ModeOptions, type SaveData } from './storage';
 
 export type RunStyle = 'timeattack' | 'survival';
 
@@ -111,9 +111,7 @@ export function creditSolve(run: RunState, size: number): number {
   return bonus;
 }
 
-/** Mode plus its option, e.g. "classic-hard", "focused-12", "mosaic". */
-export const modeVariant = (mode: ModeId, opts: ModeOptions = {}) =>
-  mode === 'classic' ? `classic-${opts.difficulty ?? 'easy'}` : mode === 'focused' ? `focused-${opts.size ?? 8}` : mode;
+export { modeVariant };
 
 export function recordKey(style: RunStyle, mode: ModeId, opts: ModeOptions = {}, minutes?: number) {
   const v = modeVariant(mode, opts);

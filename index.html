@@ -6,12 +6,24 @@
     <meta name="theme-color" content="#12141c" />
     <meta name="description" content="Explore a Shikaku world that never ends." />
     <title>Infinite Shikaku</title>
+    <link rel="icon" type="image/png" href="./favicon.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <!-- first paint: dark and calm before the stylesheet and the game arrive -->
+    <style>
+      html, body { margin: 0; height: 100%; background: #12141c; color: #eef0f7; }
+      body:not(.ready) > :not(#boot) { visibility: hidden; }
+      #boot { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #12141c; transition: opacity 0.35s ease; }
+      #boot.gone { opacity: 0; pointer-events: none; }
+      #boot .boot-art { width: 96px; height: 96px; }
+      #boot .boot-text { font: 700 13px system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: #9aa0b4; }
+    </style>
   </head>
   <body>
+    <div id="boot" role="status" aria-label="Loading"><div class="boot-art"></div><div class="boot-text">Loading</div></div>
     <canvas id="board" aria-label="Puzzle board"></canvas>
 
     <header class="hud-top">
-      <div class="brand">Infinite<span>Shikaku</span></div>
+      <div id="hud-mode" class="hud-mode"></div>
       <div class="zone-info">
         <div id="run-pills" class="pill-row" hidden></div>
         <div id="zone-label" class="pill-row"></div>
@@ -77,6 +89,7 @@
             <button id="btn-menu" class="secondary">Back to menu</button>
           </div>
         </div>
+        <button class="seed-btn" data-seed title="Copy this world's seed"><span class="seed-label"></span><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5" stroke="currentColor" stroke-width="2" fill="none"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8" stroke="currentColor" stroke-width="2" fill="none"/></svg></button>
       </div>
     </div>
 
@@ -94,6 +107,7 @@
           </div>
           <button id="btn-run-surrender" class="secondary surrender" hidden>Surrender</button>
         </div>
+        <button class="seed-btn" data-seed title="Copy this world's seed"><span class="seed-label"></span><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5" stroke="currentColor" stroke-width="2" fill="none"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8" stroke="currentColor" stroke-width="2" fill="none"/></svg></button>
       </div>
     </div>
 
@@ -134,7 +148,10 @@
           <div id="mode-sheet-option-seg" class="seg seg-wrap" role="radiogroup"></div>
         </div>
         <div class="stack">
-          <button id="btn-mode-continue" class="primary">Continue</button>
+          <div id="mode-continue-row" class="continue-row">
+            <button id="btn-mode-continue" class="primary">Continue</button>
+            <button id="btn-mode-delete" class="icon-btn trash-btn" aria-label="Delete save" title="Delete save"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M9.5 7V4.8h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5.5M14 11v5.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          </div>
           <button id="btn-mode-new" class="secondary">New</button>
           <button class="secondary" data-close>Close</button>
         </div>
@@ -152,6 +169,10 @@
       </div>
     </div>
 
+    <div id="loading" class="loading" hidden role="status" aria-live="polite">
+      <div class="loading-art"></div>
+      <div class="loading-text"></div>
+    </div>
     <div id="countdown" class="countdown" hidden>
       <div class="countdown-num"></div>
       <div class="countdown-sub"></div>
@@ -161,6 +182,7 @@
     <div id="menu" class="menu" hidden>
       <div class="menu-inner">
         <section id="menu-home" class="menu-screen">
+          <div id="menu-logo" class="menu-logo" aria-hidden="true"></div>
           <div class="menu-title">Infinite<span>Shikaku</span></div>
           <p class="menu-tag">Never-ending Shikaku.</p>
           <div class="style-list">
@@ -215,7 +237,10 @@
               <div class="field-label">Run in progress</div>
               <div id="sv-saved-pills" class="pill-row"></div>
               <div class="mode-actions">
-                <button id="btn-sv-continue" class="primary">Continue</button>
+                <div class="continue-row">
+                  <button id="btn-sv-continue" class="primary">Continue</button>
+                  <button id="btn-sv-delete" class="icon-btn trash-btn" aria-label="Delete save" title="Delete save"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M9.5 7V4.8h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5.5M14 11v5.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                </div>
                 <button id="btn-sv-new" class="secondary">New run</button>
               </div>
             </div>

@@ -41,7 +41,9 @@ Run logic lives in `src/runs.ts`.
 
 ## Saves
 
-Saves stay on the device (localStorage on the web, native storage in the phone apps; see Platforms). Every key starts with `infinite-shikaku:` (`infinity:<mode>`, `survival:<mode-option>`, `records`, `prefs`, `controls-seen`). A `schema` marker guards the format: when it changes, all older keys are wiped once.
+Saves stay on the device (localStorage on the web, native storage in the phone apps; see Platforms). Every key starts with `infinite-shikaku:` (`infinity:<mode-option>`, `survival:<mode-option>`, `records`, `prefs`, `controls-seen`). Each Classic difficulty and each Focused grid size has its own save, marked with a gold dot in the mode sheet; the bin button next to Continue deletes a save without starting a new one.
+
+**Seed.** The bottom of the pause sheet shows the world's seed, and tapping it copies it. The format is `(version)(mode)(option)_(seed)`, e.g. `6CLHA_1K9ZQ3`: version, mode `CL`/`FC`/`JO`/`MO`, option `EA`/`ME`/`HA`/`EX` for Classic, the grid size for Focused (`06` to `24`) and `00` for World modes, then the seed in base 36. A `schema` marker guards the format: when it changes, all older keys are wiped once.
 
 **Pause** (the ⏸ button or Esc) stops the timer and shows that mode's stats, including a per-grid-size table of solved count, best and average time, plus How to play and Back to menu.
 

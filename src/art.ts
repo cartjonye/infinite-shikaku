@@ -100,55 +100,71 @@ const ON = 'opacity:1;transform:scale(1)';
 const PIECE_AT = (j: number) => 0.4 + 0.3 * j;
 const SLIDE_AT = 2.5;
 
+/**
+ * Grids that grow level after level (4×4, 5×5, 6×6, then back): the Classic card
+ * with its (1) 2 3 steps, and without them the game's own mark, used for loading.
+ */
+function growArt(id: string, withSteps: boolean): string {
+  const cy = withSteps ? 40 : 45;
+  // grids grow level after level: 4×4, 5×5, 6×6, then back to level 1
+  const tl = new Timeline(id, 3 * BEAT);
+  const cell = 9;
+  const gap = 2;
+  const step = cell + gap;
+  const parts: Record<number, [number, number, number, number][]> = {
+    4: [[0, 0, 2, 2], [2, 0, 2, 2], [0, 2, 4, 2]],
+    5: [[0, 0, 3, 2], [3, 0, 2, 3], [0, 2, 3, 3], [3, 3, 2, 2]],
+    6: [[0, 0, 3, 3], [3, 0, 3, 2], [3, 2, 3, 4], [0, 3, 3, 3]],
+  };
+  const fills = ['ma-a', 'ma-b', 'ma-c', 'ma-a'];
+  const level = (slot: number, n: number, filled: boolean) => {
+    const span = n * step - gap;
+    const x0 = 60 + slot * 100 - span / 2;
+    const y0 = cy - span / 2;
+    const t0 = slot * BEAT;
+    const rects = filled
+      ? parts[n]
+          .map(
+            ([c, r, w, h], j) =>
+              `<rect x="${x0 + c * step}" y="${y0 + r * step}" width="${w * step - gap}" height="${h * step - gap}" rx="2.5" class="${fills[j]} ma-pop ma-anim" ${tl.show(t0 + PIECE_AT(j), t0 + BEAT, ON, OFF)}/>`,
+          )
+          .join('')
+      : '';
+    return `${cells(n, n, x0, y0, cell, gap)}${rects}`;
+  };
+  const x = (k: number) => `transform:translateX(${-100 * k}px)`;
+  const slide = tl.anim([
+    [0, x(0)], [SLIDE_AT, x(0)], [BEAT, x(1)], [BEAT + SLIDE_AT, x(1)], [2 * BEAT, x(2)], [2 * BEAT + SLIDE_AT, x(2)], [3 * BEAT, x(3)],
+  ]);
+  if (!withSteps) {
+    const grids = `<g class="ma-anim" ${slide}>${level(0, 4, true)}${level(1, 5, true)}${level(2, 6, true)}${level(3, 4, false)}</g>`;
+    return `<svg viewBox="24 ${cy - 36} 72 72" aria-hidden="true">${tl.style()}${grids}</svg>`;
+  }
+  // level steps under the grid: (1) 2 3, then 1 (2) 3, then 1 2 (3); the dot moves mid-slide
+  const mid = (SLIDE_AT + BEAT) / 2;
+  const dotStops: Stop[][] = [
+    [[0, 'opacity:1'], [mid, 'opacity:1'], [mid + 0.001, 'opacity:0'], [2 * BEAT + mid, 'opacity:0'], [2 * BEAT + mid + 0.001, 'opacity:1']],
+    [[0, 'opacity:0'], [mid, 'opacity:0'], [mid + 0.001, 'opacity:1'], [BEAT + mid, 'opacity:1'], [BEAT + mid + 0.001, 'opacity:0']],
+    [[0, 'opacity:0'], [BEAT + mid, 'opacity:0'], [BEAT + mid + 0.001, 'opacity:1'], [2 * BEAT + mid, 'opacity:1'], [2 * BEAT + mid + 0.001, 'opacity:0']],
+  ];
+  const steps = [1, 2, 3]
+    .map((lv) => {
+      const cx = 44 + (lv - 1) * 16;
+      return `<text x="${cx}" y="85" class="ma-lv">${lv}</text><g class="ma-step ma-anim" ${tl.anim(dotStops[lv - 1], 'linear', lv === 1 ? '' : 'opacity:0')}><circle cx="${cx}" cy="82" r="6" class="ma-step-dot"/><text x="${cx}" y="85" class="ma-lv ma-lv-on">${lv}</text></g>`;
+    })
+    .join('');
+  const body = `<g class="ma-anim" ${slide}>${level(0, 4, true)}${level(1, 5, true)}${level(2, 6, true)}${level(3, 4, false)}</g>${steps}`;
+  return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
+}
+
+/** The game mark: growing grids, used for loading screens and the menu logo. */
+export function brandArt(): string {
+  return growArt('brand', false);
+}
+
 /** Mode cards: a tiny looping picture of how each mode plays. */
 export function modeArt(mode: ModeId): string {
-  if (mode === 'classic') {
-    // grids grow level after level: 4×4, 5×5, 6×6, then back to level 1
-    const tl = new Timeline('classic', 3 * BEAT);
-    const cell = 9;
-    const gap = 2;
-    const step = cell + gap;
-    const parts: Record<number, [number, number, number, number][]> = {
-      4: [[0, 0, 2, 2], [2, 0, 2, 2], [0, 2, 4, 2]],
-      5: [[0, 0, 3, 2], [3, 0, 2, 3], [0, 2, 3, 3], [3, 3, 2, 2]],
-      6: [[0, 0, 3, 3], [3, 0, 3, 2], [3, 2, 3, 4], [0, 3, 3, 3]],
-    };
-    const fills = ['ma-a', 'ma-b', 'ma-c', 'ma-a'];
-    const level = (slot: number, n: number, filled: boolean) => {
-      const span = n * step - gap;
-      const x0 = 60 + slot * 100 - span / 2;
-      const y0 = 40 - span / 2;
-      const t0 = slot * BEAT;
-      const rects = filled
-        ? parts[n]
-            .map(
-              ([c, r, w, h], j) =>
-                `<rect x="${x0 + c * step}" y="${y0 + r * step}" width="${w * step - gap}" height="${h * step - gap}" rx="2.5" class="${fills[j]} ma-pop ma-anim" ${tl.show(t0 + PIECE_AT(j), t0 + BEAT, ON, OFF)}/>`,
-            )
-            .join('')
-        : '';
-      return `${cells(n, n, x0, y0, cell, gap)}${rects}`;
-    };
-    const x = (k: number) => `transform:translateX(${-100 * k}px)`;
-    const slide = tl.anim([
-      [0, x(0)], [SLIDE_AT, x(0)], [BEAT, x(1)], [BEAT + SLIDE_AT, x(1)], [2 * BEAT, x(2)], [2 * BEAT + SLIDE_AT, x(2)], [3 * BEAT, x(3)],
-    ]);
-    // level steps under the grid: (1) 2 3, then 1 (2) 3, then 1 2 (3); the dot moves mid-slide
-    const mid = (SLIDE_AT + BEAT) / 2;
-    const dotStops: Stop[][] = [
-      [[0, 'opacity:1'], [mid, 'opacity:1'], [mid + 0.001, 'opacity:0'], [2 * BEAT + mid, 'opacity:0'], [2 * BEAT + mid + 0.001, 'opacity:1']],
-      [[0, 'opacity:0'], [mid, 'opacity:0'], [mid + 0.001, 'opacity:1'], [BEAT + mid, 'opacity:1'], [BEAT + mid + 0.001, 'opacity:0']],
-      [[0, 'opacity:0'], [BEAT + mid, 'opacity:0'], [BEAT + mid + 0.001, 'opacity:1'], [2 * BEAT + mid, 'opacity:1'], [2 * BEAT + mid + 0.001, 'opacity:0']],
-    ];
-    const steps = [1, 2, 3]
-      .map((lv) => {
-        const cx = 44 + (lv - 1) * 16;
-        return `<text x="${cx}" y="85" class="ma-lv">${lv}</text><g class="ma-step ma-anim" ${tl.anim(dotStops[lv - 1], 'linear', lv === 1 ? '' : 'opacity:0')}><circle cx="${cx}" cy="82" r="6" class="ma-step-dot"/><text x="${cx}" y="85" class="ma-lv ma-lv-on">${lv}</text></g>`;
-      })
-      .join('');
-    const body = `<g class="ma-anim" ${slide}>${level(0, 4, true)}${level(1, 5, true)}${level(2, 6, true)}${level(3, 4, false)}</g>${steps}`;
-    return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
-  }
+  if (mode === 'classic') return growArt('classic', true);
   if (mode === 'focused') {
     // the same size every time: one grid fills, then slides off as an identical one slides in
     const tl = new Timeline('focused', BEAT);
@@ -168,28 +184,39 @@ export function modeArt(mode: ModeId): string {
     return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
   }
   if (mode === 'journey') {
-    // a small centre, then one bigger ring per beat, then the world resets
-    const tl = new Timeline('journey', 3 * BEAT);
-    const ring = (half: number, size: number, cls: string) => {
-      let out = '';
-      const steps = Math.round((2 * half) / size);
-      for (let i = 0; i < steps; i++)
-        for (let j = 0; j < steps; j++) {
-          if (i > 0 && i < steps - 1 && j > 0 && j < steps - 1) continue;
-          out += `<rect x="${60 - half + i * size + 1}" y="${45 - half + j * size + 1}" width="${size - 2}" height="${size - 2}" rx="2" class="${cls}"/>`;
-        }
+    // a small centre, then each bigger ring fills cell by cell, clockwise from the top left
+    const tl = new Timeline('journey', 2 * BEAT);
+    const end = 2 * BEAT;
+    /** The cells of a square ring, in clockwise order. */
+    const ringCells = (half: number, size: number): [number, number][] => {
+      const n = Math.round((2 * half) / size);
+      const out: [number, number][] = [];
+      for (let i = 0; i < n; i++) out.push([i, 0]);
+      for (let j = 1; j < n; j++) out.push([n - 1, j]);
+      for (let i = n - 2; i >= 0; i--) out.push([i, n - 1]);
+      for (let j = n - 2; j > 0; j--) out.push([0, j]);
       return out;
     };
-    const rings: [number, number, string, number][] = [
-      [8, 8, 'ma-core', 0.3],
-      [20, 10, 'ma-ring1', BEAT + 0.3],
-      [36, 12, 'ma-ring2', 2 * BEAT + 0.3],
+    const rect = (half: number, size: number, [i, j]: [number, number], cls: string, extra = '') =>
+      `<rect x="${60 - half + i * size + 1}" y="${45 - half + j * size + 1}" width="${size - 2}" height="${size - 2}" rx="2" class="${cls}" ${extra}/>`;
+    const rings: [number, number, string, number, number][] = [
+      // half, cell, colour, first cell lights at, last cell lights at
+      [8, 8, 'ma-core', 0.2, 0.2],
+      [20, 10, 'ma-ring1', 0.5, 1.4],
+      [36, 12, 'ma-ring2', 1.7, 3.0],
     ];
-    const end = 3 * BEAT;
-    const dim = rings.map(([h, s]) => ring(h, s, 'ma-ring')).join('');
-    const lit = rings
-      .map(([h, s, cls, at]) => `<g class="ma-grow ma-anim" ${tl.show(at, end - 0.6, 'opacity:1;transform:scale(1)', 'opacity:0;transform:scale(.85)', 0.4, 0.5)}>${ring(h, s, cls)}</g>`)
-      .join('');
+    const ON = 'opacity:1;transform:scale(1)';
+    const OFF = 'opacity:0;transform:scale(.5)';
+    let dim = '';
+    let lit = '';
+    for (const [half, size, cls, from, to] of rings) {
+      const cells = half === 8 ? [[0, 0], [1, 0], [1, 1], [0, 1]] as [number, number][] : ringCells(half, size);
+      cells.forEach((c, k) => {
+        dim += rect(half, size, c, 'ma-ring');
+        const at = half === 8 ? from : from + ((to - from) * k) / (cells.length - 1);
+        lit += rect(half, size, c, `${cls} ma-pop ma-anim`, tl.show(at, end - 0.6, ON, OFF, 0.12, 0.5));
+      });
+    }
     return `<svg ${VIEW}>${tl.style()}${dim}${lit}</svg>`;
   }
   // mosaic: a patchwork of every size lighting up tile by tile until it is whole
