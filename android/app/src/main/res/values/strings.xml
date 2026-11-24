@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Infinite Shikaku</string>
+    <string name="title_activity_main">Infinite Shikaku</string>
+    <string name="package_name">com.infiniteshikaku.app</string>
+    <string name="custom_url_scheme">com.infiniteshikaku.app</string>
+</resources>

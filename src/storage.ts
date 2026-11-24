@@ -1,7 +1,8 @@
 /**
- * localStorage persistence, one save per game mode.
+ * Save persistence (through kv: localStorage on the web, native storage in the app), one save per game mode.
  * Every access is guarded so the game still runs (without saving) when storage is unavailable.
  */
+import { kv, KEY_PREFIX } from './kv';
 import { zoneByKey, type Difficulty, type ModeId, type WorldLayout } from './layouts';
 import type { Rect } from './types';
 
@@ -10,7 +11,7 @@ import type { Rect } from './types';
  * differs from SCHEMA, all of them are wiped once (saves, run slots, records, prefs,
  * the controls card flag): older data uses mode names and layouts that no longer exist.
  */
-export const PREFIX = 'infinite-shikaku:';
+export const PREFIX = KEY_PREFIX;
 export const SCHEMA = 5;
 const SCHEMA_KEY = `${PREFIX}schema`;
 export const SAVE_VERSION = SCHEMA;
@@ -103,18 +104,14 @@ export function freshSave(mode: ModeId, opts: ModeOptions = {}): SaveData {
 
 function read(key: string): any {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = kv.get(key);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
 }
 function remove(key: string) {
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    /* ignore */
-  }
+  kv.remove(key);
 }
 
 function isValid(d: any, mode: ModeId): boolean {
@@ -134,19 +131,11 @@ function isValid(d: any, mode: ModeId): boolean {
 
 /** Wipe every key from an older schema, once. Returns true if anything was wiped. */
 export function ensureSchema(): boolean {
-  try {
-    if (localStorage.getItem(SCHEMA_KEY) === String(SCHEMA)) return false;
-    const old: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith(PREFIX)) old.push(k);
-    }
-    old.forEach(remove);
-    localStorage.setItem(SCHEMA_KEY, String(SCHEMA));
-    return old.length > 0;
-  } catch {
-    return false;
-  }
+  if (kv.get(SCHEMA_KEY) === String(SCHEMA)) return false;
+  const old = kv.keys().filter((k) => k.startsWith(PREFIX));
+  old.forEach(remove);
+  kv.set(SCHEMA_KEY, String(SCHEMA));
+  return old.length > 0;
 }
 ensureSchema();
 
@@ -170,14 +159,14 @@ export function sanitize(d: SaveData, L: WorldLayout): SaveData {
 }
 
 export function writeSave(d: SaveData): boolean {
+  d.lastPlayed = Date.now();
+  let json: string;
   try {
-    d.lastPlayed = Date.now();
-    localStorage.setItem(saveKey(d.mode), JSON.stringify(d));
-    localStorage.setItem(LAST_MODE_KEY, d.mode);
-    return true;
+    json = JSON.stringify(d);
   } catch {
     return false;
   }
+  return kv.set(saveKey(d.mode), json) && kv.set(LAST_MODE_KEY, d.mode);
 }
 
 export function clearSave(mode: ModeId) {
@@ -185,12 +174,8 @@ export function clearSave(mode: ModeId) {
 }
 
 export function lastMode(): ModeId | null {
-  try {
-    const m = localStorage.getItem(LAST_MODE_KEY);
-    return m === 'classic' || m === 'focused' || m === 'journey' || m === 'mosaic' ? m : null;
-  } catch {
-    return null;
-  }
+  const m = kv.get(LAST_MODE_KEY);
+  return m === 'classic' || m === 'focused' || m === 'journey' || m === 'mosaic' ? m : null;
 }
 
 export interface SaveSummary {

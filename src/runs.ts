@@ -3,6 +3,7 @@
  * every solve tops up; saved so a long run survives a closed tab). Also personal bests
  * and the player's last-picked run settings.
  */
+import { kv } from './kv';
 import { classicLevelSize, type Difficulty, type ModeId } from './layouts';
 import { PREFIX, type ModeOptions, type SaveData } from './storage';
 
@@ -143,7 +144,7 @@ const survivalKey = (mode: ModeId, opts: ModeOptions = {}) => `${PREFIX}survival
 
 function read<T>(key: string): T | null {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = kv.get(key);
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
@@ -151,8 +152,7 @@ function read<T>(key: string): T | null {
 }
 function write(key: string, v: unknown): boolean {
   try {
-    localStorage.setItem(key, JSON.stringify(v));
-    return true;
+    return kv.set(key, JSON.stringify(v));
   } catch {
     return false;
   }
@@ -195,11 +195,7 @@ export function writeSurvival(save: SaveData, run: RunState): boolean {
   return write(survivalKey(run.mode, runOptions(run)), { save, run } satisfies SurvivalSlot);
 }
 export function clearSurvival(mode: ModeId, opts: ModeOptions = {}) {
-  try {
-    localStorage.removeItem(survivalKey(mode, opts));
-  } catch {
-    /* ignore */
-  }
+  kv.remove(survivalKey(mode, opts));
 }
 
 /** The player's last run choices, per play style. */

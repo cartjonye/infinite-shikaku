@@ -1,4 +1,6 @@
 import './style.css';
+import { kv } from './kv';
+import { setupNative } from './native';
 import { controlArt, guideArt, modeArt, type ControlKind } from './art';
 import {
   DIFFICULTIES,
@@ -706,11 +708,7 @@ window.addEventListener(
 // ---------- How to play & controls (shown once, replayable) ----------
 const COACH_KEY = `${PREFIX}controls-seen`;
 function coachSeen() {
-  try {
-    return localStorage.getItem(COACH_KEY) === '1';
-  } catch {
-    return true;
-  }
+  return kv.get(COACH_KEY) === '1';
 }
 const touchFirst = () => window.matchMedia?.('(pointer: coarse)').matches ?? false;
 function openGuide() {
@@ -733,11 +731,7 @@ function openCoach() {
   coachModal.hidden = false;
 }
 $('#btn-coach-ok').addEventListener('click', () => {
-  try {
-    localStorage.setItem(COACH_KEY, '1');
-  } catch {
-    /* ignore */
-  }
+  kv.set(COACH_KEY, '1');
   closeModals();
 });
 $('#btn-coach-guide').addEventListener('click', openGuide);
@@ -1427,6 +1421,35 @@ document.querySelectorAll<HTMLButtonElement>('.style-btn').forEach((b) =>
 );
 $('#btn-back').addEventListener('click', showHome);
 
+// ---------- phone apps: back button and backgrounding ----------
+/** Android back: close what is on top, pause a game, step back in the menu; false = leave the app. */
+function handleBack(): boolean {
+  if (!confirmModal.hidden) {
+    settleConfirm(false);
+    return true;
+  }
+  if (inGame) {
+    if (!resultsModal.hidden) endSession();
+    else if (anyModalOpen()) closeModals();
+    else openPause(); // ignored during the 3, 2, 1 countdown
+    return true;
+  }
+  if (!modeSheet.hidden) {
+    modeSheet.hidden = true;
+    return true;
+  }
+  if (anyModalOpen()) {
+    closeModals();
+    return true;
+  }
+  if (menuStyle) {
+    showHome();
+    return true;
+  }
+  return false;
+}
+void setupNative({ back: handleBack, save: saveNow });
+
 // ---------- main loop ----------
 let lastTick = performance.now();
 let hudAcc = 0;
@@ -1550,13 +1573,7 @@ const zoneOf = (key: string) => zoneByKey(layout, key) ?? layout.origin;
   get failed() {
     return world.failed ? { zone: world.failed.zone.key, ...world.failed.rect } : null;
   },
-  dismissCoach: () => {
-    try {
-      localStorage.setItem('infinite-shikaku:coach:v1', '1');
-    } catch {
-      /* ignore */
-    }
-  },
+  dismissCoach: () => kv.set(COACH_KEY, '1'),
   /** test helper: take time off the run clock */
   fastForward: (ms: number) => {
     if (run) run.clockMs = Math.max(1, run.clockMs - ms);

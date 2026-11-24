@@ -41,7 +41,7 @@ Run logic lives in `src/runs.ts`.
 
 ## Saves
 
-Everything lives in localStorage under `infinite-shikaku:` (`infinity:<mode>`, `survival:<mode-option>`, `records`, `prefs`, `controls-seen`). A `schema` marker guards the format: when it changes, all older keys are wiped once.
+Saves stay on the device (localStorage on the web, native storage in the phone apps; see Platforms). Every key starts with `infinite-shikaku:` (`infinity:<mode>`, `survival:<mode-option>`, `records`, `prefs`, `controls-seen`). A `schema` marker guards the format: when it changes, all older keys are wiped once.
 
 **Pause** (the ⏸ button or Esc) stops the timer and shows that mode's stats, including a per-grid-size table of solved count, best and average time, plus How to play and Back to menu.
 
@@ -63,3 +63,24 @@ Everything lives in localStorage under `infinite-shikaku:` (`infinity:<mode>`, `
 ## Scale
 
 `tests/scale.test.ts` plays 5,000 zones in each mode: solve bookkeeping averages well under 0.1 ms, the save stays near 65 KB, and reloading takes about 40 ms. Solved zones are generated in a Web Worker and the puzzle cache is bounded, so large worlds reload without freezing.
+
+## Platforms
+
+One codebase in `src/` runs as the website, the Android app, and the iOS app later. The apps use [Capacitor](https://capacitorjs.com): the same Vite build runs inside the phone's system WebView, so the renderer, input and puzzle generator are shared line for line.
+
+The few phone-only pieces sit behind a platform check and do nothing on the web:
+
+- `src/kv.ts`: storage. The web uses localStorage. The apps use native storage (Capacitor Preferences), because iOS may clear a WebView's localStorage. Native keys are loaded into memory once at startup (`src/boot.ts`), so the game still reads synchronously.
+- `src/native.ts`: the Android back button (close a dialog, otherwise pause, otherwise step back in the menu, otherwise leave the app) and a save when the app goes to the background.
+- `capacitor.config.ts`: app id `com.infiniteshikaku.app` (permanent once published), edge-to-edge layout with dark system bars. The CSS already pads with `env(safe-area-inset-*)`.
+
+### Android
+
+- **Download a test build:** every push runs the `Android app` workflow. Open it in the repository's Actions tab, download the `infinite-shikaku-debug-apk` artifact, unzip it and install `app-debug.apk` on the phone (allow installs from that source when asked).
+- **Build locally:** install Android Studio (with JDK 21), then `npm ci`, `npm run cap:sync` and `npm run android:open`, and press Run. Or in `android/`, run `./gradlew assembleDebug`.
+- **After changing the game:** run `npm run cap:sync` to copy the new web build into the Android project.
+- **Play Store (later):** a signed release bundle (`./gradlew bundleRelease`) needs an upload keystore kept as a repository secret.
+
+### iOS (later)
+
+`npx cap add ios` creates the Xcode project next to `android/`; no game code changes. Building and signing need a Mac with Xcode (or a macOS CI runner) and an Apple Developer account.
