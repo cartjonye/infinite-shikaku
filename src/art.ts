@@ -196,10 +196,10 @@ export function modeArt(mode: ModeId): string {
   }
   if (mode === 'journey') {
     // the world grows from one centre: solid zones fade in outward, unevenly (sometimes the
-    // player goes back for an easier one) until the world is whole, then one slow breath
+    // player goes back for an easier one) until the world is whole
     const C = 3 * BEAT;
     const tl = new Timeline('journey', C);
-    const rnd = seeded(0x5eed1234); // fixed, so the picture is the same every time
+    const rnd = seeded(0x7e57ab1e); // fixed, so the picture is the same every time
     type Cell = { x: number; y: number; w: number; col: string; ring: number };
     /** The cells of a square ring (or the 2×2 centre). */
     const ring = (half: number, size: number, col: string, idx: number, full = false): Cell[] => {
@@ -221,14 +221,12 @@ export function modeArt(mode: ModeId): string {
     const inner = new Map<Cell, Cell[]>();
     for (const c of r1) inner.set(c, core.filter((d) => touches(c, d)));
     for (const c of r2) inner.set(c, r1.filter((d) => touches(c, d)));
-    // slow and soft: long fades spread over most of the loop, then one breath and a fade out
-    const BREATH_AT = 6.3;
-    const BREATH_END = 8.3;
+    // slow and soft: every tile takes its time to fill in, the world holds, then fades out
     const FADE_AT = 8.3;
     const SOFT = 'cubic-bezier(.3,0,.2,1)';
-    const FADE_IN = 0.8;
+    const FADE_IN = 1.6;
     const start = new Map<Cell, number>();
-    const fadeOf = (c: Cell) => (c.ring === 0 ? 0.8 : FADE_IN);
+    const fadeOf = (c: Cell) => (c.ring === 0 ? 1.2 : FADE_IN);
     const doneAt = (c: Cell) => start.get(c)! + fadeOf(c);
     for (const c of core) start.set(c, 0.2);
     // play it out: each step picks at random among the zones that are open right now, so the
@@ -248,7 +246,8 @@ export function modeArt(mode: ModeId): string {
       const c = pool[Math.floor(rnd() * pool.length)];
       start.set(c, t);
       todo.splice(todo.indexOf(c), 1);
-      t += 0.08 + rnd() * 0.09; // uneven gaps, about 0.125 s on average
+      // uneven gaps: unhurried while only small zones are open, brisker once the world opens up
+      t += outer.length ? 0.07 + rnd() * 0.08 : 0.16 + rnd() * 0.1;
     }
     const cell = (c: Cell) => {
       // a solid tile that simply fades in where it belongs
@@ -257,14 +256,7 @@ export function modeArt(mode: ModeId): string {
       return `<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.w}" rx="2" fill="${c.col}" data-ring="${c.ring}" data-at="${at.toFixed(3)}" data-done="${doneAt(c).toFixed(3)}" class="ma-anim" ${style}/>`;
     };
     const cells = [...core, ...r1, ...r2].map(cell).join('');
-    const breath = tl.anim([
-      [0, 'transform:scale(1)'],
-      [BREATH_AT, 'transform:scale(1)'],
-      [(BREATH_AT + BREATH_END) / 2, 'transform:scale(1.035)'],
-      [BREATH_END, 'transform:scale(1)'],
-    ]);
-    const body = `<g class="ma-breath ma-anim" ${breath}>${cells}</g>`;
-    return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
+    return `<svg ${VIEW}>${tl.style()}${cells}</svg>`;
   }
   // mosaic: a patchwork of every size (4, 2 and 1 units on an exact 6×6 grid), lighting up
   // tile by tile, smallest first and the big one last, until it is whole; touching tiles

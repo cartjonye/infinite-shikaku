@@ -662,7 +662,6 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 .ma-lv-on { fill: #12141c; }
 .ma-step-dot { fill: var(--accent); }
 .ma-tile { fill: #2a3042; }
-.ma-breath { transform-box: view-box; transform-origin: 60px 45px; }
 @media (prefers-reduced-motion: reduce) {
   .ma-anim { animation: none !important; }
   .ga-grow, .ga-move { animation: none; opacity: 1; }
