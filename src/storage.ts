@@ -5,7 +5,7 @@
  */
 import { kv, KEY_PREFIX } from './kv';
 import { DIFFICULTIES, FOCUSED_SIZES, zoneByKey, type Difficulty, type ModeId, type WorldLayout } from './layouts';
-import type { Rect } from './types';
+import { rectArea, type Rect } from './types';
 
 /**
  * Storage schema. Every key the game writes starts with PREFIX. When the stored schema
@@ -186,6 +186,16 @@ export function writeSave(d: SaveData): boolean {
 
 export function clearSave(mode: ModeId, opts: ModeOptions = {}) {
   remove(saveKey(mode, opts));
+}
+
+/**
+ * Cells covered by rectangles on unsolved zones, right or wrong: an almost-solved zone
+ * still earns most of its area. Solved zones hold no rectangles (World.markSolved clears them).
+ */
+export function placedArea(d: Pick<SaveData, 'rects'>): number {
+  let n = 0;
+  for (const list of Object.values(d.rects)) for (const q of list) n += rectArea(q);
+  return n;
 }
 
 export interface SaveSummary {

@@ -30,6 +30,7 @@ import {
   loadSave,
   sanitize,
   modeVariant,
+  placedArea,
   saveOptions,
   savedOptions,
   seedCode,
@@ -596,6 +597,8 @@ function setHtml(el: HTMLElement, html: string) {
   }
 }
 const area = (n: number) => `${n.toLocaleString('en-US')} m²`;
+/** A run's area so far: solved zones plus every cell covered on unsolved ones. */
+const runArea = (r: RunState) => (runPhase === 'over' ? r.area : r.area + placedArea(save));
 const zonesText = (n: number) => `${n} ${n === 1 ? 'zone' : 'zones'}`;
 /** Countdown clocks round up, so 0:00 only shows when time is truly out. */
 const clock = (ms: number) => fmt(Math.ceil(Math.max(0, ms) / 1000) * 1000);
@@ -648,7 +651,7 @@ function updateHud() {
     timerEl.textContent = clock(run.clockMs);
     timerEl.classList.remove('idle');
     timerEl.classList.toggle('low', runPhase === 'live' && !countdownActive && run.clockMs < 10_000);
-    setHtml(runPillsEl, pills([[area(run.area), 'gold'], zonesText(run.zones)]));
+    setHtml(runPillsEl, pills([[area(runArea(run)), 'gold'], zonesText(run.zones)]));
     solvedCount.textContent = String(run.zones);
   } else timerEl.classList.remove('low');
   runPillsEl.hidden = !run;
@@ -826,6 +829,7 @@ function renderStats() {
   // total area of every solved zone, in square cells (1 cell = 1 m)
   let total = 0;
   for (const [n, b] of Object.entries(st.bySize)) total += Number(n) * Number(n) * b.solved;
+  total += placedArea(save); // plus every cell already covered on unsolved zones
   const rows: [string, string][] = [
     ['Zones solved', String(st.zonesSolved)],
     ['Area cleared', area(total)],
@@ -1196,7 +1200,7 @@ function openRunPause() {
   $('#run-pause-sub').innerHTML = pills(runPills(run));
   const rows: [string, string][] = [
     ['Time left', clock(run.clockMs)],
-    ['Area cleared', area(run.area)],
+    ['Area cleared', area(runArea(run))],
     ['Zones solved', String(run.zones)],
     run.style === 'survival' ? ['Survived', fmt(run.elapsedMs)] : ['Time played', fmt(run.elapsedMs)],
     ...(run.style === 'survival'
@@ -1213,8 +1217,10 @@ function openRunPause() {
 }
 
 function endRun(surrendered = false) {
-  if (!run) return;
+  if (!run || runPhase === 'over') return; // once per run: the placed cells are banked below
   run.clockMs = 0;
+  // cells covered on the unsolved zone(s) count too, right or wrong
+  run.area += placedArea(save);
   runPhase = 'over';
   stopCountdown();
   preview = null;
@@ -1496,7 +1502,7 @@ function renderRunPanel() {
   if (slot)
     $('#sv-saved-pills').innerHTML = pills([
       [`${clock(slot.run.clockMs)} left`, 'gold'],
-      area(slot.run.area),
+      area(slot.run.area + placedArea(slot.save)),
       zonesText(slot.run.zones),
       `${fmt(slot.run.elapsedMs)} survived`,
     ]);

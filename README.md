@@ -35,6 +35,7 @@ The main menu offers three play styles. Each shows the four modes as animated ca
 
 - **Infinity**: tap a card for its sheet with **Continue** or **New** (Classic asks for a difficulty, Focused for a size). One save per mode.
 - **Time Attack**: clear as much area as possible in 2, 5 or 10 minutes, in a fresh game of the chosen mode. Not saved; personal bests are kept per mode, option and length.
+- **Area** (m², 1 cell = 1 m) counts every solved zone plus every cell covered by a rectangle on an unsolved one, right or wrong, so a zone left almost solved when the clock runs out still earns most of its area. Survival time bonuses still need a whole solve.
 - **Survival**: every solved zone adds time, read from the fixed matrix `SURVIVAL_BONUS_S` in `src/runs.ts` (grid size × run step; a step is three zones, and the last column applies from zone 73). 6×6 goes from 30 s to 6 s, 24×24 from 240 s to 120 s. A run starts with 3× the first grid's first bonus (`SURVIVAL_START_S`): 90 s on a 6×6 start, up to 12:00 on Focused 24×24. A run in progress is saved per mode and option. Surrender ends the run with the time survived counted.
 
 Run logic lives in `src/runs.ts`.

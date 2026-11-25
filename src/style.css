@@ -661,11 +661,8 @@ body.in-run .confirm-modal, .confirm-modal { background: rgba(6, 7, 11, 0.6); ba
 .ma-lv { fill: var(--dim); font-size: 8.5px; font-weight: 800; text-anchor: middle; }
 .ma-lv-on { fill: #12141c; }
 .ma-step-dot { fill: var(--accent); }
-.ma-ring { fill: #2a3042; }
-.ma-core { fill: #f7d58b; }
-.ma-ring1 { fill: #9fc7f0; }
-.ma-ring2 { fill: #c9b3ef; }
 .ma-tile { fill: #2a3042; }
+.ma-breath { transform-box: view-box; transform-origin: 60px 45px; }
 @media (prefers-reduced-motion: reduce) {
   .ma-anim { animation: none !important; }
   .ga-grow, .ga-move { animation: none; opacity: 1; }

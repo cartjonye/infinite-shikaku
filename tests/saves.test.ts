@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DIFFICULTIES, FOCUSED_SIZES, type ModeId } from '../src/layouts';
+import { DIFFICULTIES, FOCUSED_SIZES, createJourneyLayout, type ModeId } from '../src/layouts';
+import { World } from '../src/world';
 import {
   SCHEMA,
   clearSave,
   freshSave,
   loadSave,
   parseSeedCode,
+  placedArea,
   savedOptions,
   seedCode,
   summarize,
@@ -100,5 +102,28 @@ describe('seed codes', () => {
   it('rejects malformed codes', () => {
     for (const bad of ['', 'CLHA_123', '6XXHA_1', '6CLZZ_1', '6FC07_1', '6JO12_1', '6CLHA-1', '6CLHA_', '12345CLHA_1', '6CLHA_ZZZZZZZZ'])
       expect(parseSeedCode(bad)).toBeNull();
+  });
+});
+
+describe('area credit for placed cells', () => {
+  it('is 0 for a fresh save and sums every rectangle on unsolved zones', () => {
+    const d = freshSave('journey');
+    expect(placedArea(d)).toBe(0);
+    d.rects = {
+      a: [{ c: 0, r: 0, w: 2, h: 3 }, { c: 2, r: 0, w: 1, h: 1 }],
+      b: [{ c: 0, r: 0, w: 4, h: 2 }],
+    };
+    expect(placedArea(d)).toBe(6 + 1 + 8);
+  });
+
+  it('a solved zone hands its area to the solved total, never counted twice', () => {
+    const L = createJourneyLayout();
+    const d = freshSave('journey');
+    const w = new World(L, d);
+    const z = L.origin;
+    d.rects[z.key] = [{ c: 0, r: 0, w: 3, h: 2 }];
+    expect(placedArea(d)).toBe(6);
+    w.markSolved(z);
+    expect(placedArea(d)).toBe(0);
   });
 });

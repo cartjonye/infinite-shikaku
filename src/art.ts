@@ -162,6 +162,17 @@ export function brandArt(): string {
   return growArt('brand', false);
 }
 
+/** Small seeded random numbers (mulberry32), for art that is irregular but always the same. */
+function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /** Mode cards: a tiny looping picture of how each mode plays. */
 export function modeArt(mode: ModeId): string {
   if (mode === 'classic') return growArt('classic', true);
@@ -184,53 +195,91 @@ export function modeArt(mode: ModeId): string {
     return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
   }
   if (mode === 'journey') {
-    // a small centre, then each bigger ring fills cell by cell, clockwise from the top left
-    const tl = new Timeline('journey', 2 * BEAT);
-    const end = 2 * BEAT;
-    /** The cells of a square ring, in clockwise order. */
-    const ringCells = (half: number, size: number): [number, number][] => {
+    // the world grows from one centre: zones open outward unevenly (sometimes the player goes
+    // back for an easier one), every zone fills once all are open, then one slow breath
+    const C = 3 * BEAT;
+    const tl = new Timeline('journey', C);
+    const rnd = seeded(0x5eed1234); // fixed, so the picture is the same every time
+    const shuffle = <T>(a: T[]): T[] => {
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(rnd() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+    type Cell = { x: number; y: number; w: number; col: string };
+    /** The cells of a square ring (or the 2×2 centre). */
+    const ring = (half: number, size: number, col: string, full = false): Cell[] => {
       const n = Math.round((2 * half) / size);
-      const out: [number, number][] = [];
-      for (let i = 0; i < n; i++) out.push([i, 0]);
-      for (let j = 1; j < n; j++) out.push([n - 1, j]);
-      for (let i = n - 2; i >= 0; i--) out.push([i, n - 1]);
-      for (let j = n - 2; j > 0; j--) out.push([0, j]);
+      const out: Cell[] = [];
+      for (let i = 0; i < n; i++)
+        for (let j = 0; j < n; j++)
+          if (full || i === 0 || j === 0 || i === n - 1 || j === n - 1)
+            out.push({ x: 60 - half + i * size + 1, y: 45 - half + j * size + 1, w: size - 2, col });
       return out;
     };
-    const rect = (half: number, size: number, [i, j]: [number, number], cls: string, extra = '') =>
-      `<rect x="${60 - half + i * size + 1}" y="${45 - half + j * size + 1}" width="${size - 2}" height="${size - 2}" rx="2" class="${cls}" ${extra}/>`;
-    const rings: [number, number, string, number, number][] = [
-      // half, cell, colour, first cell lights at, last cell lights at
-      [8, 8, 'ma-core', 0.2, 0.2],
-      [20, 10, 'ma-ring1', 0.5, 1.4],
-      [36, 12, 'ma-ring2', 1.7, 3.0],
-    ];
-    const ON = 'opacity:1;transform:scale(1)';
-    const OFF = 'opacity:0;transform:scale(.5)';
-    let dim = '';
-    let lit = '';
-    for (const [half, size, cls, from, to] of rings) {
-      const cells = half === 8 ? [[0, 0], [1, 0], [1, 1], [0, 1]] as [number, number][] : ringCells(half, size);
-      cells.forEach((c, k) => {
-        dim += rect(half, size, c, 'ma-ring');
-        const at = half === 8 ? from : from + ((to - from) * k) / (cells.length - 1);
-        lit += rect(half, size, c, `${cls} ma-pop ma-anim`, tl.show(at, end - 0.6, ON, OFF, 0.12, 0.5));
-      });
+    const core = ring(8, 8, '#f7d58b', true);
+    const r1 = shuffle(ring(20, 10, '#9fc7f0'));
+    const r2 = shuffle(ring(36, 12, '#c9b3ef'));
+    // three inner cells are left for later and picked up among the outer ring
+    const held = r1.splice(r1.length - 3, 3);
+    const order = [...r1, ...r2];
+    [2, 7, 13].forEach((k, i) => order.splice(r1.length + k, 0, held[i]));
+    const FILL_AT = 5.0;
+    const FILLED = 5.8;
+    const BREATH_END = 8.1;
+    const FADE_AT = 8.2;
+    const DIM = '#2a3042';
+    const cell = (c: Cell, at: number, glide: number) => {
+      // start part of the way towards the centre, small, then glide out to its place
+      const dx = +((60 - (c.x + c.w / 2)) * 0.55).toFixed(2);
+      const dy = +((45 - (c.y + c.w / 2)) * 0.55).toFixed(2);
+      const look = (o: number, t: string, fill: string, sw: number) =>
+        `opacity:${o};transform:${t};fill:${fill};stroke:${c.col};stroke-width:${sw}`;
+      const home = 'translate(0px,0px) scale(1)';
+      const style = tl.anim([
+        [0, look(0, `translate(${dx}px,${dy}px) scale(.45)`, DIM, 0.9)],
+        [at, look(0, `translate(${dx}px,${dy}px) scale(.45)`, DIM, 0.9)],
+        [at + glide, look(1, home, DIM, 0.9)],
+        [FILL_AT, look(1, home, DIM, 0.9)],
+        [FILLED, look(1, home, c.col, 0)],
+        [FADE_AT, look(1, home, c.col, 0)],
+        [C, look(0, home, c.col, 0)],
+      ]);
+      return `<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.w}" rx="2" fill="${c.col}" class="ma-pop ma-anim" ${style}/>`;
+    };
+    let cells = core.map((c) => cell(c, 0.2, 0.8)).join('');
+    let t = 1.0;
+    for (const c of order) {
+      cells += cell(c, t, 0.7);
+      t += 0.05 + rnd() * 0.08;
     }
-    return `<svg ${VIEW}>${tl.style()}${dim}${lit}</svg>`;
+    const breath = tl.anim([
+      [0, 'transform:scale(1)'],
+      [FILLED, 'transform:scale(1)'],
+      [(FILLED + BREATH_END) / 2, 'transform:scale(1.035)'],
+      [BREATH_END, 'transform:scale(1)'],
+    ]);
+    const body = `<g class="ma-breath ma-anim" ${breath}>${cells}</g>`;
+    return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
   }
-  // mosaic: a patchwork of every size lighting up tile by tile until it is whole
+  // mosaic: a patchwork of every size (4, 2 and 1 units on an exact 6×6 grid), lighting up
+  // tile by tile until it is whole; touching tiles never share a colour
   const tl = new Timeline('mosaic', 3 * BEAT);
-  const tiles: [number, number, number][] = [
-    [22, 8, 30], [54, 8, 14], [70, 8, 28], [54, 24, 14], [22, 40, 14], [38, 40, 14], [54, 40, 44], [22, 56, 30],
+  const U = 12.5;
+  const GAP = 2;
+  const X0 = 23.5;
+  const Y0 = 8.5;
+  const tiles: [number, number, number, string][] = [
+    [0, 0, 4, 'ma-b'], [4, 0, 2, 'ma-c'], [4, 2, 2, 'ma-a'], [0, 4, 2, 'ma-a'], [2, 4, 2, 'ma-c'],
+    [4, 4, 1, 'ma-b'], [5, 4, 1, 'ma-c'], [4, 5, 1, 'ma-a'], [5, 5, 1, 'ma-b'],
   ];
-  const lit = ['ma-b', 'ma-c', 'ma-a'];
   const end = 3 * BEAT;
   const body = tiles
-    .map(
-      ([x, y, s], i) =>
-        `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="3" class="ma-tile"/><rect x="${x}" y="${y}" width="${s}" height="${s}" rx="3" class="${lit[i % 3]} ma-anim" ${tl.show(0.5 + 0.75 * i, end - 0.6, 'opacity:1', 'opacity:0', 0.25, 0.5)}/>`,
-    )
+    .map(([c, r, k, cls], i) => {
+      const geo = `x="${X0 + c * U}" y="${Y0 + r * U}" width="${k * U - GAP}" height="${k * U - GAP}" rx="3"`;
+      return `<rect ${geo} class="ma-tile"/><rect ${geo} data-cell="${c},${r},${k}" class="${cls} ma-anim" ${tl.show(0.5 + 0.6 * i, end - 0.6, 'opacity:1', 'opacity:0', 0.25, 0.5)}/>`;
+    })
     .join('');
   return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
 }
