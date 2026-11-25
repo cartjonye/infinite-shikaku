@@ -195,8 +195,8 @@ export function modeArt(mode: ModeId): string {
     return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
   }
   if (mode === 'journey') {
-    // the world grows from one centre: zones open outward unevenly (sometimes the player goes
-    // back for an easier one), every zone fills once all are open, then one slow breath
+    // the world grows from one centre: solid zones glide outward unevenly (sometimes the player
+    // goes back for an easier one) until the world is whole, then one slow breath
     const C = 3 * BEAT;
     const tl = new Timeline('journey', C);
     const rnd = seeded(0x5eed1234); // fixed, so the picture is the same every time
@@ -225,39 +225,33 @@ export function modeArt(mode: ModeId): string {
     const held = r1.splice(r1.length - 3, 3);
     const order = [...r1, ...r2];
     [2, 7, 13].forEach((k, i) => order.splice(r1.length + k, 0, held[i]));
-    const FILL_AT = 5.0;
-    const FILLED = 5.8;
-    const BREATH_END = 8.1;
-    const FADE_AT = 8.2;
-    const DIM = '#2a3042';
+    // slow and soft: long glides spread over most of the loop, then one breath and a fade
+    const BREATH_AT = 6.3;
+    const BREATH_END = 8.3;
+    const FADE_AT = 8.3;
+    const SOFT = 'cubic-bezier(.3,0,.2,1)';
     const cell = (c: Cell, at: number, glide: number) => {
-      // start part of the way towards the centre, small, then glide out to its place
+      // a solid tile that starts part of the way towards the centre, small, and glides out to its place
       const dx = +((60 - (c.x + c.w / 2)) * 0.55).toFixed(2);
       const dy = +((45 - (c.y + c.w / 2)) * 0.55).toFixed(2);
-      const look = (o: number, t: string, fill: string, sw: number) =>
-        `opacity:${o};transform:${t};fill:${fill};stroke:${c.col};stroke-width:${sw}`;
-      const home = 'translate(0px,0px) scale(1)';
-      const style = tl.anim([
-        [0, look(0, `translate(${dx}px,${dy}px) scale(.45)`, DIM, 0.9)],
-        [at, look(0, `translate(${dx}px,${dy}px) scale(.45)`, DIM, 0.9)],
-        [at + glide, look(1, home, DIM, 0.9)],
-        [FILL_AT, look(1, home, DIM, 0.9)],
-        [FILLED, look(1, home, c.col, 0)],
-        [FADE_AT, look(1, home, c.col, 0)],
-        [C, look(0, home, c.col, 0)],
-      ]);
+      const away = `opacity:0;transform:translate(${dx}px,${dy}px) scale(.45)`;
+      const home = 'opacity:1;transform:translate(0px,0px) scale(1)';
+      const style = tl.anim(
+        [[0, away], [at, away], [at + glide, home], [FADE_AT, home], [C, 'opacity:0;transform:translate(0px,0px) scale(1)']],
+        SOFT,
+      );
       return `<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.w}" rx="2" fill="${c.col}" class="ma-pop ma-anim" ${style}/>`;
     };
-    let cells = core.map((c) => cell(c, 0.2, 0.8)).join('');
-    let t = 1.0;
+    let cells = core.map((c) => cell(c, 0.2, 1.2)).join('');
+    let t = 1.2;
     for (const c of order) {
-      cells += cell(c, t, 0.7);
-      t += 0.05 + rnd() * 0.08;
+      cells += cell(c, t, 1.2);
+      t += 0.08 + rnd() * 0.07; // uneven gaps, about 0.115 s on average
     }
     const breath = tl.anim([
       [0, 'transform:scale(1)'],
-      [FILLED, 'transform:scale(1)'],
-      [(FILLED + BREATH_END) / 2, 'transform:scale(1.035)'],
+      [BREATH_AT, 'transform:scale(1)'],
+      [(BREATH_AT + BREATH_END) / 2, 'transform:scale(1.035)'],
       [BREATH_END, 'transform:scale(1)'],
     ]);
     const body = `<g class="ma-breath ma-anim" ${breath}>${cells}</g>`;
