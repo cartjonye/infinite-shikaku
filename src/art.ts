@@ -195,59 +195,68 @@ export function modeArt(mode: ModeId): string {
     return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
   }
   if (mode === 'journey') {
-    // the world grows from one centre: solid zones glide outward unevenly (sometimes the player
-    // goes back for an easier one) until the world is whole, then one slow breath
+    // the world grows from one centre: solid zones fade in outward, unevenly (sometimes the
+    // player goes back for an easier one) until the world is whole, then one slow breath
     const C = 3 * BEAT;
     const tl = new Timeline('journey', C);
     const rnd = seeded(0x5eed1234); // fixed, so the picture is the same every time
-    const shuffle = <T>(a: T[]): T[] => {
-      for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(rnd() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-      }
-      return a;
-    };
-    type Cell = { x: number; y: number; w: number; col: string };
+    type Cell = { x: number; y: number; w: number; col: string; ring: number };
     /** The cells of a square ring (or the 2×2 centre). */
-    const ring = (half: number, size: number, col: string, full = false): Cell[] => {
+    const ring = (half: number, size: number, col: string, idx: number, full = false): Cell[] => {
       const n = Math.round((2 * half) / size);
       const out: Cell[] = [];
       for (let i = 0; i < n; i++)
         for (let j = 0; j < n; j++)
           if (full || i === 0 || j === 0 || i === n - 1 || j === n - 1)
-            out.push({ x: 60 - half + i * size + 1, y: 45 - half + j * size + 1, w: size - 2, col });
+            out.push({ x: 60 - half + i * size + 1, y: 45 - half + j * size + 1, w: size - 2, col, ring: idx });
       return out;
     };
-    const core = ring(8, 8, '#f7d58b', true);
-    const r1 = shuffle(ring(20, 10, '#9fc7f0'));
-    const r2 = shuffle(ring(36, 12, '#c9b3ef'));
-    // three inner cells are left for later and picked up among the outer ring
-    const held = r1.splice(r1.length - 3, 3);
-    const order = [...r1, ...r2];
-    [2, 7, 13].forEach((k, i) => order.splice(r1.length + k, 0, held[i]));
-    // slow and soft: long glides spread over most of the loop, then one breath and a fade
+    const core = ring(8, 8, '#f7d58b', 0, true);
+    const r1 = ring(20, 10, '#9fc7f0', 1);
+    const r2 = ring(36, 12, '#c9b3ef', 2);
+    /** Side or corner neighbours across the small gap between tiles. */
+    const touches = (a: Cell, b: Cell) =>
+      Math.max(0, a.x - (b.x + b.w), b.x - (a.x + a.w)) <= 7 && Math.max(0, a.y - (b.y + b.w), b.y - (a.y + a.w)) <= 7;
+    // like the game: a bigger zone opens only once the smaller zones next to it are solved
+    const inner = new Map<Cell, Cell[]>();
+    for (const c of r1) inner.set(c, core.filter((d) => touches(c, d)));
+    for (const c of r2) inner.set(c, r1.filter((d) => touches(c, d)));
+    // slow and soft: long fades spread over most of the loop, then one breath and a fade out
     const BREATH_AT = 6.3;
     const BREATH_END = 8.3;
     const FADE_AT = 8.3;
     const SOFT = 'cubic-bezier(.3,0,.2,1)';
-    const cell = (c: Cell, at: number, glide: number) => {
-      // a solid tile that starts part of the way towards the centre, small, and glides out to its place
-      const dx = +((60 - (c.x + c.w / 2)) * 0.55).toFixed(2);
-      const dy = +((45 - (c.y + c.w / 2)) * 0.55).toFixed(2);
-      const away = `opacity:0;transform:translate(${dx}px,${dy}px) scale(.45)`;
-      const home = 'opacity:1;transform:translate(0px,0px) scale(1)';
-      const style = tl.anim(
-        [[0, away], [at, away], [at + glide, home], [FADE_AT, home], [C, 'opacity:0;transform:translate(0px,0px) scale(1)']],
-        SOFT,
-      );
-      return `<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.w}" rx="2" fill="${c.col}" class="ma-pop ma-anim" ${style}/>`;
-    };
-    let cells = core.map((c) => cell(c, 0.2, 1.2)).join('');
-    let t = 1.2;
-    for (const c of order) {
-      cells += cell(c, t, 1.2);
-      t += 0.08 + rnd() * 0.07; // uneven gaps, about 0.115 s on average
+    const FADE_IN = 0.8;
+    const start = new Map<Cell, number>();
+    const fadeOf = (c: Cell) => (c.ring === 0 ? 0.8 : FADE_IN);
+    const doneAt = (c: Cell) => start.get(c)! + fadeOf(c);
+    for (const c of core) start.set(c, 0.2);
+    // play it out: each step picks at random among the zones that are open right now, so the
+    // world grows unevenly and sometimes goes back for a smaller zone, but never skips ahead
+    const todo = [...r1, ...r2];
+    let t = 1.0;
+    while (todo.length) {
+      const open = todo.filter((c) => inner.get(c)!.every((d) => start.has(d) && doneAt(d) <= t + 1e-9));
+      if (!open.length) {
+        t = Math.min(...[...start.keys()].map(doneAt).filter((x) => x > t + 1e-9));
+        continue;
+      }
+      // the player usually pushes outward when a bigger zone is open, and comes back for the
+      // smaller ones left behind
+      const outer = open.filter((c) => c.ring === 2);
+      const pool = outer.length && rnd() < 0.7 ? outer : open;
+      const c = pool[Math.floor(rnd() * pool.length)];
+      start.set(c, t);
+      todo.splice(todo.indexOf(c), 1);
+      t += 0.08 + rnd() * 0.09; // uneven gaps, about 0.125 s on average
     }
+    const cell = (c: Cell) => {
+      // a solid tile that simply fades in where it belongs
+      const at = start.get(c)!;
+      const style = tl.anim([[0, 'opacity:0'], [at, 'opacity:0'], [at + fadeOf(c), 'opacity:1'], [FADE_AT, 'opacity:1'], [C, 'opacity:0']], SOFT);
+      return `<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.w}" rx="2" fill="${c.col}" data-ring="${c.ring}" data-at="${at.toFixed(3)}" data-done="${doneAt(c).toFixed(3)}" class="ma-anim" ${style}/>`;
+    };
+    const cells = [...core, ...r1, ...r2].map(cell).join('');
     const breath = tl.anim([
       [0, 'transform:scale(1)'],
       [BREATH_AT, 'transform:scale(1)'],
@@ -258,7 +267,8 @@ export function modeArt(mode: ModeId): string {
     return `<svg ${VIEW}>${tl.style()}${body}</svg>`;
   }
   // mosaic: a patchwork of every size (4, 2 and 1 units on an exact 6×6 grid), lighting up
-  // tile by tile until it is whole; touching tiles never share a colour
+  // tile by tile, smallest first and the big one last, until it is whole; touching tiles
+  // never share a colour
   const tl = new Timeline('mosaic', 3 * BEAT);
   const U = 12.5;
   const GAP = 2;
@@ -269,7 +279,8 @@ export function modeArt(mode: ModeId): string {
     [4, 4, 1, 'ma-b'], [5, 4, 1, 'ma-c'], [4, 5, 1, 'ma-a'], [5, 5, 1, 'ma-b'],
   ];
   const end = 3 * BEAT;
-  const body = tiles
+  const order = [...tiles].sort((a, b) => a[2] - b[2]); // stable: same-size tiles keep their order
+  const body = order
     .map(([c, r, k, cls], i) => {
       const geo = `x="${X0 + c * U}" y="${Y0 + r * U}" width="${k * U - GAP}" height="${k * U - GAP}" rx="3"`;
       return `<rect ${geo} class="ma-tile"/><rect ${geo} data-cell="${c},${r},${k}" class="${cls} ma-anim" ${tl.show(0.5 + 0.6 * i, end - 0.6, 'opacity:1', 'opacity:0', 0.25, 0.5)}/>`;
